@@ -1,0 +1,6 @@
+{
+  "name": "Samira Traders - Distribution Management System",
+  "description": "A comprehensive distribution management software for tracking inventory, sales, suppliers, and customers. Built for efficiency and ease of use.",
+  "requestFramePermissions": ["geolocation", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

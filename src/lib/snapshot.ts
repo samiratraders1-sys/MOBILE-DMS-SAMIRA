@@ -1,0 +1,42 @@
+import { db } from "./firebase";
+import { collection, getDocs } from "firebase/firestore";
+
+const COLLECTIONS_TO_SNAPSHOT = [
+    "products", "routes", "staff", "summaries", "customers", 
+    "suppliers", "orders", "customerGroups", "sales", "users",
+    "roles", "transfers", "payments", "categories", "damageInventory",
+    "purchases", "accounts", "incomeCategories", "subDbs", 
+    "subDbShipments", "subDbSettings", "stockAdjustments", "boms", 
+    "productions", "attendance", "payroll", "fixedAssets", "loans",
+    "returns"
+];
+
+export const snapshotAll = async () => {
+    try {
+        console.log("Snapshot: Running...");
+        if (!db) {
+            console.error("Firestore DB is not initialized yet");
+            return;
+        }
+        
+        // Log the Firestore object to check its type in browser console
+        console.log("Firestore DB instance:", db);
+
+        for (const name of COLLECTIONS_TO_SNAPSHOT) {
+            try {
+                // Ensure name is a string and valid collection name
+                if (typeof name !== 'string') continue;
+                
+                const snap = await getDocs(collection(db, name));
+                const data = snap.docs.map(d => ({id: d.id, ...d.data()}));
+                localStorage.setItem(`snapshot_${name}`, JSON.stringify(data));
+            } catch (err) {
+                console.error(`Error snapshotting ${name}:`, err);
+            }
+        }
+        localStorage.setItem("snapshot_last_time", new Date().toISOString());
+        console.log("Snapshot successful");
+    } catch (e) {
+        console.error("Snapshot failed unexpectedly:", e);
+    }
+};

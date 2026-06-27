@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">SamiraTraders</string>
+    <string name="title_activity_main">SamiraTraders</string>
+    <string name="package_name">com.samiratraders.erp</string>
+    <string name="custom_url_scheme">com.samiratraders.erp</string>
+</resources>

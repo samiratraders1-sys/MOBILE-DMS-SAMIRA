@@ -1,0 +1,42 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile with role assignment.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "name": { "type": "string", "description": "Full name" },
+        "email": { "type": "string", "description": "Email address" },
+        "roleId": { "type": "string", "description": "Reference to Roles collection" }
+      },
+      "required": ["uid", "name", "email", "roleId"]
+    },
+    "Role": {
+      "title": "Role",
+      "description": "User role definition.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Role ID" },
+        "name": { "type": "string", "description": "Role name (e.g., Admin, DSR)" },
+        "permissions": { "type": "array", "description": "List of permission IDs", "format": "array" }
+      },
+      "required": ["id", "name", "permissions"]
+    },
+    "Permission": {
+      "title": "Permission",
+      "description": "Permission definition.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Permission ID (e.g., pos_create)" },
+        "description": { "type": "string", "description": "Description of permission" }
+      },
+      "required": ["id", "description"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": { "schema": "User", "description": "User profiles" },
+    "/roles/{roleId}": { "schema": "Role", "description": "Defined roles" },
+    "/permissions/{permissionId}": { "schema": "Permission", "description": "Defined permissions" }
+  }
+}
