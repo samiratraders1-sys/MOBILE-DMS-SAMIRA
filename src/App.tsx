@@ -442,8 +442,24 @@ export default function App() {
   };
 
   useEffect(() => {
+    try {
+      const savedDemoUser = localStorage.getItem("demo_user_session");
+      if (savedDemoUser) {
+        setUser(JSON.parse(savedDemoUser));
+        setLoading(false);
+        return;
+      }
+    } catch (e) {
+      console.error("Failed to parse saved demo user:", e);
+    }
+
     const unsubscribe = onAuthStateChanged(auth, (u) => {
-      setUser(u);
+      const savedDemoUser = localStorage.getItem("demo_user_session");
+      if (!u && !savedDemoUser) {
+        setUser(null);
+      } else if (u) {
+        setUser(u);
+      }
       setLoading(false);
     });
     return () => unsubscribe();
@@ -511,14 +527,44 @@ export default function App() {
     );
   }
 
+  const handleEnterDemo = () => {
+    const demoUser = {
+      email: "samiratraders1@gmail.com",
+      uid: "demo-admin",
+      displayName: "Demo Admin",
+      emailVerified: true
+    };
+    try {
+      localStorage.setItem("demo_user_session", JSON.stringify(demoUser));
+      setUser(demoUser);
+      window.dispatchEvent(new Event("auth-state-change"));
+      toast.success("ডেমো মোডে সফলভাবে লগইন করা হয়েছে!");
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   if (!user) {
     return (
       <>
-        <AuthScreen />
+        <AuthScreen onEnterDemo={handleEnterDemo} />
         <Toaster position="bottom-right" />
       </>
     );
   }
+
+  const handleLogout = async () => {
+    try {
+      localStorage.removeItem("demo_user_session");
+      setUser(null);
+      window.dispatchEvent(new Event("auth-state-change"));
+      await signOut(auth);
+      toast.success("সফলভাবে লগ আউট করা হয়েছে।");
+    } catch (err: any) {
+      console.error("Logout error:", err);
+      toast.error("লগ আউট করতে সমস্যা হয়েছে।");
+    }
+  };
 
   const currentUserRecord = users.data.find(u => u.email === user?.email);
   console.log("DEBUG App.tsx users.data:", users.data);
@@ -1025,7 +1071,7 @@ export default function App() {
           user={user} 
           role={role}
           roles={roles.data}
-          onLogout={() => signOut(auth)} 
+          onLogout={handleLogout} 
           pendingApprovalsCount={totalPendingApprovals}
         />
       </div>
@@ -1092,6 +1138,13 @@ export default function App() {
                <Smartphone className="w-4 h-4 shrink-0 text-amber-300 animate-pulse" />
                <span>{t("মোবাইলে ইনস্টল")}</span>
             </button>
+
+            {user?.uid === "demo-admin" && (
+               <div className="flex items-center gap-2 bg-indigo-50 border border-indigo-100 px-3.5 py-2 rounded-xl">
+                 <Sparkles className="w-4 h-4 text-indigo-500 animate-pulse shrink-0" />
+                 <span className="text-xs font-black text-indigo-700">{t("ডেমো মোড সক্রিয়")}</span>
+               </div>
+            )}
 
             {isOnline ? (
                <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-100 px-3.5 py-2 rounded-xl">

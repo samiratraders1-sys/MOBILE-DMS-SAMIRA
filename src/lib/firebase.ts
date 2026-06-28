@@ -5,10 +5,14 @@ import {
   persistentLocalCache, 
   persistentMultipleTabManager,
   doc, 
-  getDocFromServer 
+  getDocFromServer,
+  setLogLevel
 } from 'firebase/firestore';
 import 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
+
+// Suppress benign warnings (like sub-second clock skew warnings) in the console
+setLogLevel('error');
 
 const app = initializeApp(firebaseConfig);
 

@@ -29,6 +29,15 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [license, setLicense] = useState<any | null>(null);
   const [subscription, setSubscription] = useState<any | null>(null);
   const [loadingCompany, setLoadingCompany] = useState(true);
+  const [authStateCounter, setAuthStateCounter] = useState(0);
+
+  useEffect(() => {
+    const handleAuthChange = () => {
+      setAuthStateCounter(prev => prev + 1);
+    };
+    window.addEventListener("auth-state-change", handleAuthChange);
+    return () => window.removeEventListener("auth-state-change", handleAuthChange);
+  }, []);
 
   useEffect(() => {
     if (companyId) {
@@ -39,6 +48,37 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
   }, [companyId]);
 
   useEffect(() => {
+    const isDemoMode = localStorage.getItem("demo_user_session") !== null;
+
+    if (isDemoMode) {
+      setCompany({
+        id: "samira-traders",
+        name: "Samira Traders",
+        logo: "",
+        address: "Dhaka, Bangladesh",
+        phone: "+8801700000000",
+        email: "samiratraders1@gmail.com",
+        status: "active",
+        createdAt: new Date().toISOString()
+      });
+      setLicense({
+        id: "lic-samira",
+        companyId: "samira-traders",
+        plan: "Enterprise",
+        status: "active",
+        type: "Lifetime",
+        expiryDate: "2036-12-31"
+      });
+      setSubscription({
+        id: "sub-samira",
+        companyId: "samira-traders",
+        status: "active"
+      });
+      setCompanyId("samira-traders");
+      setLoadingCompany(false);
+      return;
+    }
+
     const unsubscribeAuth = auth.onAuthStateChanged((user) => {
       if (!user) {
         setCompany(null);
@@ -108,7 +148,7 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     });
 
     return () => unsubscribeAuth();
-  }, [companyId]);
+  }, [companyId, authStateCounter]);
 
   // Determine read-only mode:
   // - Company is suspended

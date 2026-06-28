@@ -249,6 +249,44 @@ export default function DashboardView({ products, summaries, customers, routes, 
   };
 
   const isManagerOrAdmin = role === "admin" || role === "manager";
+  
+  // Calculations for KPI grid
+  const { totalSalesValue, netProfit, totalExpenses, totalReturnVal, totalFreeCount, totalDiscountCount } = useMemo(() => {
+    let totalSalesValue = 0;
+    let totalReturnVal = 0;
+    let totalExpenses = 0;
+    let totalCostOfSales = 0;
+    let totalFreeCount = 0;
+    let totalDiscountCount = 0;
+    
+    summaries.filter(s => s.status === 'settled').forEach(s => {
+      totalSalesValue += (s.salesValue || 0);
+      totalExpenses += (s.expenses || []).reduce((acc: number, e: any) => acc + (e.amount || 0), 0);
+      
+      (s.items || []).forEach((item: any) => {
+        const prod = products.find(p => p.id === item.productId);
+        const cost = prod?.cost || item.cost || 0;
+        
+        const returns = item.returns || 0;
+        totalReturnVal += (returns * item.price);
+        
+        const soldQty = item.totalPieces - returns - (item.free || 0);
+        totalCostOfSales += (soldQty * cost);
+        totalFreeCount += (item.free || 0);
+      });
+    });
+
+    (sales || []).forEach((sale: any) => {
+      (sale.items || []).forEach((item: any) => {
+        totalFreeCount += Number(item.freeQty || 0);
+        totalDiscountCount += Number(item.discount || 0);
+      });
+    });
+
+    const netProfit = totalSalesValue - totalCostOfSales - totalExpenses;
+
+    return { totalSalesValue, netProfit, totalExpenses, totalReturnVal, totalFreeCount, totalDiscountCount };
+  }, [products, summaries, sales]);
 
   const currentYearMonthPrefix = useMemo(() => {
     const now = new Date();
@@ -301,10 +339,12 @@ export default function DashboardView({ products, summaries, customers, routes, 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ data: { products, summaries } })
       });
+      if (!res.ok) throw new Error("AI মডেল বর্তমানে ব্যস্ত, দয়া করে কিছুক্ষণ পর আবার চেষ্টা করুন।");
       const data = await res.json();
       setAiInsight(data.insight);
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
+      toast.error(e.message || "AI ইনসাইট লোড করতে ব্যর্থ হয়েছে।");
     } finally {
       setLoadingAi(false);
     }
@@ -343,40 +383,6 @@ export default function DashboardView({ products, summaries, customers, routes, 
       ];
     }
 
-    let totalSalesValue = 0;
-    let totalReturnVal = 0;
-    let totalExpenses = 0;
-    let totalCostOfSales = 0;
-    let totalFreeCount = 0;
-    let totalDiscountCount = 0;
-    
-    summaries.filter(s => s.status === 'settled').forEach(s => {
-      totalSalesValue += (s.salesValue || 0);
-      totalExpenses += (s.expenses || []).reduce((acc: number, e: any) => acc + (e.amount || 0), 0);
-      
-      (s.items || []).forEach((item: any) => {
-        const prod = products.find(p => p.id === item.productId);
-        const cost = prod?.cost || item.cost || 0;
-        
-        const returns = item.returns || 0;
-        totalReturnVal += (returns * item.price);
-        
-        const soldQty = item.totalPieces - returns - (item.free || 0);
-        totalCostOfSales += (soldQty * cost);
-        totalFreeCount += (item.free || 0);
-      });
-    });
-
-    // Accumulate Free and Discounts from independent sales (POS checkout sales)
-    (sales || []).forEach((sale: any) => {
-      (sale.items || []).forEach((item: any) => {
-        totalFreeCount += Number(item.freeQty || 0);
-        totalDiscountCount += Number(item.discount || 0);
-      });
-    });
-
-    const netProfit = totalSalesValue - totalCostOfSales - totalExpenses;
-    
     return [
       { label: "মোট বিক্রি", value: formatCurrency(totalSalesValue), icon: TrendingUp, color: "text-blue-600", bg: "bg-blue-50/50" },
       { label: "মোট রিটার্ন", value: formatCurrency(totalReturnVal), icon: AlertTriangle, color: "text-red-500", bg: "bg-red-50/50" },
@@ -385,7 +391,7 @@ export default function DashboardView({ products, summaries, customers, routes, 
       { label: "মোট খরচ", value: formatCurrency(totalExpenses), icon: ShoppingCart, color: "text-yellow-600", bg: "bg-yellow-50/50" },
       { label: "নিট প্রফিট", value: formatCurrency(netProfit), icon: Sparkles, color: "text-emerald-600", bg: "bg-emerald-50/50" },
     ];
-  }, [products, summaries, customers, routes, sales, isManagerOrAdmin]);
+  }, [products, customers, routes, isManagerOrAdmin, totalSalesValue, totalReturnVal, totalFreeCount, totalDiscountCount, totalExpenses, netProfit]);
 
   const quickAccessButtons = useMemo(() => {
     const buttons = [
@@ -843,34 +849,34 @@ export default function DashboardView({ products, summaries, customers, routes, 
   };
 
   return (
-    <div className="space-y-10 p-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6">
+    <div className="space-y-8 p-8 bg-gray-50 min-h-screen">
+      <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 bg-white p-6 rounded-3xl border border-gray-100 shadow-sm">
         <div>
-           <h2 className="text-4xl font-extrabold tracking-tight text-gray-950">সারসংক্ষেপ</h2>
-           <p className="text-gray-500 mt-2 text-lg">আপনার ব্যবসার চলতি অবস্থার আপডেট</p>
+           <h2 className="text-3xl font-black text-gray-950 tracking-tight">Enterprise Dashboard</h2>
+           <p className="text-gray-500 mt-1 font-medium">Welcome back, Admin • {new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {isManagerOrAdmin && (
             <button 
               onClick={handleDownloadPDF}
-              className="flex items-center gap-2.5 px-6 py-3 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 transition-all cursor-pointer shadow-sm hover:shadow-md"
+              className="flex items-center gap-2.5 px-5 py-2.5 bg-emerald-600 text-white rounded-xl font-bold hover:bg-emerald-700 transition-all cursor-pointer shadow-sm"
             >
-              <Download className="w-5 h-5" />
-              ডাউনলোড রিপোর্ট (PDF)
+              <Download className="w-4 h-4" />
+              Report
             </button>
           )}
           {isManagerOrAdmin && (
             <button 
               onClick={getAiInsight}
               disabled={loadingAi}
-              className="flex items-center gap-2.5 px-6 py-3 bg-gray-900 text-white rounded-2xl font-bold hover:bg-black transition-all disabled:opacity-50 cursor-pointer"
+              className="flex items-center gap-2.5 px-5 py-2.5 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all disabled:opacity-50 cursor-pointer shadow-sm"
             >
-              {loadingAi ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}
-              AI পরামর্শ নিন
+              {loadingAi ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+              AI Insight
             </button>
           )}
         </div>
-      </div>
+      </header>
 
       {/* Periodic Backup Reminder Alert */}
       {isBackupOverdue && (
@@ -979,129 +985,70 @@ export default function DashboardView({ products, summaries, customers, routes, 
             <RefreshCw className={`w-3.5 h-3.5 ${isTestingSync ? "animate-spin" : ""}`} />
             {isTestingSync ? "যাচাই করা হচ্ছে..." : "সংযোগ স্টেটাস যাচাই"}
           </button>
-
-          <button
-            type="button"
-            onClick={handleExportBackup}
-            disabled={isExportingBackup}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all border shadow-2xs active:scale-95 duration-100 ${
-              isExportingBackup 
-                ? "bg-slate-50 text-slate-400 border-slate-200 cursor-not-allowed" 
-                : "bg-[#111827] hover:bg-[#1f2937] text-white border-transparent cursor-pointer"
-            }`}
-            title="এখনি সমস্ত ডাটাসেট নিরাপদ JSON ফাইল হিসেবে ব্যাকআপ ডাউনলোড করুন"
-          >
-            <Download className={`w-3.5 h-3.5 ${isExportingBackup ? "animate-pulse" : ""}`} />
-            {isExportingBackup ? (exportBackupStatus || "প্রস্তুত হচ্ছে...") : "ম্যানুয়াল ব্যাকআপ ও অফলাইন ব্যাকআপ (Backup JSON)"}
-          </button>
         </div>
       </motion.div>
-
-      {/* Approval Efficiency Report Card */}
-      <div className="bg-white p-6 rounded-3xl border border-gray-150 shadow-sm flex items-center justify-between gap-5 transition-all">
-        <div className="flex items-center gap-4">
-           <div className="p-3 bg-indigo-50 text-indigo-600 rounded-2xl">
-             <ShieldCheck className="w-6 h-6" />
-           </div>
-           <div>
-             <h4 className="font-bold text-sm text-gray-800">অনুমোদন দক্ষতা (Approval Efficiency)</h4>
-             <p className="text-xs text-slate-500 font-medium">গড় অনুমোদন সময়</p>
-           </div>
-        </div>
-        <div className="text-right">
-           <div className="text-xl font-black text-gray-950">{approvalEfficiency.avgTime}</div>
-           <div className="text-xs font-bold text-emerald-600">{approvalEfficiency.trend} (গত সপ্তাহের তুলনায়)</div>
-        </div>
-      </div>
-
-      <AnimatePresence>
-        {aiInsight && (
-          <motion.div 
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            className="bg-purple-900 text-purple-50 p-8 rounded-3xl relative overflow-hidden shadow-2xl"
-          >
-            <div className="absolute top-0 right-0 p-8 opacity-10">
-              <Sparkles className="w-32 h-32 text-white" />
-            </div>
-            <h4 className="font-bold text-xl mb-4 flex items-center gap-2 text-white">
-              <Sparkles className="w-5 h-5" /> AI বিজনেস ইনসাইট
-            </h4>
-            <div className="text-purple-100 text-base max-w-3xl whitespace-pre-wrap leading-relaxed">
-              {aiInsight}
-            </div>
-            <button 
-              onClick={() => setAiInsight(null)}
-              className="mt-6 text-sm font-semibold text-purple-300 hover:text-white underline underline-offset-4"
-            >
-              বন্ধ করুন
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      <div className={`grid grid-cols-1 sm:grid-cols-2 ${isManagerOrAdmin ? "lg:grid-cols-3 xl:grid-cols-5" : "lg:grid-cols-4"} gap-6`}>
-        {stats.map((stat, i) => (
+      {/* New Enterprise KPI Grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6 mb-8">
+        {[
+          { label: "Total Sales", value: formatCurrency(totalSalesValue), icon: TrendingUp, color: "text-blue-600", bg: "bg-blue-50" },
+          { label: "Revenue", value: formatCurrency(netProfit), icon: DollarSign, color: "text-emerald-600", bg: "bg-emerald-50" },
+          { label: "Orders", value: summaries.length.toString(), icon: ShoppingCart, color: "text-violet-600", bg: "bg-violet-50" },
+          { label: "Customers", value: customers.length.toString(), icon: Users, color: "text-amber-600", bg: "bg-amber-50" },
+          { label: "Collection", value: formatCurrency(summaries.reduce((acc, s) => acc + (s.payment || 0), 0)), icon: Database, color: "text-sky-600", bg: "bg-sky-50" },
+          { label: "Outstanding Due", value: formatCurrency(customers.reduce((acc, c) => acc + (c.due || 0), 0)), icon: AlertTriangle, color: "text-red-600", bg: "bg-red-50" },
+        ].map((stat, i) => (
           <motion.div 
             key={stat.label}
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.1 }}
-            onClick={() => {
-              if (stat.label === "মোট বিক্রি") setActiveView("reports");
-              if (stat.label === "মোট রিটার্ন") setActiveView("reports");
-              if (stat.label === "মোট খরচ") setActiveView("finance");
-              if (stat.label === "নিট প্রফিট") setActiveView("reports");
-
-              if (stat.label === "মোট পণ্য") setActiveView("inventory");
-              if (stat.label === "কম স্টক পণ্য") setActiveView("inventory");
-              if (stat.label === "মোট কাস্টমার") setActiveView("customers");
-              if (stat.label === "সক্রিয় رুট") setActiveView("routes");
-            }}
-            className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm hover:shadow-lg transition-all cursor-pointer flex flex-col justify-between"
+            transition={{ delay: i * 0.05 }}
+            className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer flex flex-col gap-3 group"
           >
-            <div className="flex justify-between items-start mb-6">
-               <p className="text-sm font-semibold text-gray-500">{stat.label}</p>
-               <div className={`p-2.5 rounded-2xl ${stat.bg}`}>
-                 <stat.icon className={`w-6 h-6 ${stat.color}`} />
-               </div>
-            </div>
-            <h3 className="text-3xl font-extrabold tracking-tighter text-gray-950">{stat.value}</h3>
-          </motion.div>
-        ))}
-
-        {isManagerOrAdmin && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 4 * 0.1 }}
-            onClick={() => setActiveView("finance")}
-            className="others-income-card bg-white p-6 rounded-3xl border border-gray-100 shadow-sm hover:shadow-lg transition-all cursor-pointer flex flex-col justify-between relative group"
-          >
-            <div className="flex justify-between items-start mb-6">
-               <p className="text-sm font-semibold text-gray-500">চলতি মাসের অন্যান্য আয়</p>
-               <div className="p-2.5 rounded-2xl bg-indigo-50/50">
-                 <DollarSign className="w-6 h-6 text-indigo-600" />
-               </div>
+            <div className={`p-2.5 rounded-lg ${stat.bg} ${stat.color} w-fit`}>
+              <stat.icon className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-3xl font-extrabold tracking-tighter text-gray-950 mb-3">
-                {formatCurrency(totalOthersIncome)}
-              </h3>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setShowAuditModal(true);
-                }}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-all rounded-xl text-xs font-bold cursor-pointer"
-              >
-                <History className="w-3.5 h-3.5" /> অডিট লগ (Audit Log)
-              </button>
+              <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">{stat.label}</p>
+              <p className="text-xl font-black text-gray-950 mt-0.5">{stat.value}</p>
+            </div>
+            <div className="pt-2 border-t border-gray-100 flex items-center justify-between text-[10px] font-bold">
+               <span className="text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">↑ 2.5%</span>
+               <span className="text-gray-400">vs month</span>
             </div>
           </motion.div>
-        )}
+        ))}
       </div>
+
+      {isManagerOrAdmin && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3 }}
+          onClick={() => setActiveView("finance")}
+          className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm hover:shadow-lg transition-all cursor-pointer flex flex-col justify-between mb-8 group"
+        >
+          <div className="flex justify-between items-start mb-4">
+              <p className="text-sm font-semibold text-gray-500">চলতি মাসের অন্যান্য আয়</p>
+              <div className="p-2.5 rounded-xl bg-indigo-50/50">
+                <DollarSign className="w-5 h-5 text-indigo-600" />
+              </div>
+          </div>
+          <div>
+            <h3 className="text-2xl font-black text-gray-950 mb-3">
+              {formatCurrency(totalOthersIncome)}
+            </h3>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowAuditModal(true);
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-all rounded-lg text-xs font-bold cursor-pointer"
+            >
+              <History className="w-3.5 h-3.5" /> অডিট লগ (Audit Log)
+            </button>
+          </div>
+        </motion.div>
+      )}
 
       {/* 🧭 DMS Interactive Control Hub & Navigation Workspace */}
       <div className="bg-slate-50 border border-slate-200/80 p-8 rounded-3xl shadow-xs space-y-6">
@@ -1156,17 +1103,32 @@ export default function DashboardView({ products, summaries, customers, routes, 
         <div className="min-h-[200px]">
           {hubActiveTab === "workspace" && (
             <div className="space-y-6">
-              <div className="bg-white/80 p-5 rounded-2xl border border-indigo-100 flex items-center justify-between flex-col md:flex-row gap-4 shadow-3xs">
-                <div className="flex gap-3.5 items-start">
-                  <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl mt-0.5">
-                    <HelpCircle className="w-5 h-5 animate-bounce" />
-                  </div>
+              <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
+                <div className="flex items-center justify-between mb-6">
                   <div>
-                    <h4 className="font-extrabold text-sm text-slate-800">ডিস্ট্রিবিউটর ও রুট ডেইলী অপারেশন গাইড (Daily DMS Flow Checklist)</h4>
-                    <p className="text-xs text-slate-500 font-medium leading-relaxed mt-1">
-                      একটি আদর্শ ডিস্ট্রিবিউশন ডেইলী অপারেশন সম্পন্ন করতে নিচের ১ থেকে ৫ নম্বর ধাপ অনুসরণ করুন। প্রতিটি বোতামে ক্লিক করে প্রয়োজনীয় ডাটা এন্ট্রি পেজে সরাসরি যেতে পারেন।
-                    </p>
+                    <h4 className="font-bold text-gray-950 text-sm">Quick Actions</h4>
+                    <p className="text-xs text-gray-500 mt-0.5">Frequent operational tasks</p>
                   </div>
+                </div>
+
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                  {[
+                    { label: "New Sale", icon: ShoppingCart, view: "orders" },
+                    { label: "Purchase", icon: Package, view: "purchases" },
+                    { label: "Customer", icon: Users, view: "customers" },
+                    { label: "Supplier", icon: Truck, view: "suppliers" },
+                    { label: "Payment", icon: DollarSign, view: "payments" },
+                    { label: "Transfer", icon: RefreshCw, view: "transfers" },
+                  ].map((action) => (
+                    <button
+                      key={action.label}
+                      onClick={() => setActiveView(action.view)}
+                      className="flex flex-col items-center justify-center gap-2 p-4 bg-gray-50 hover:bg-emerald-50 text-gray-700 hover:text-emerald-700 rounded-xl transition-all border border-gray-100"
+                    >
+                      <action.icon className="w-5 h-5" />
+                      <span className="text-[10px] font-bold">{action.label}</span>
+                    </button>
+                  ))}
                 </div>
               </div>
 
@@ -1713,56 +1675,50 @@ export default function DashboardView({ products, summaries, customers, routes, 
           </div>
         </div>
         
-        <div className="flex-1 w-full min-h-[300px]">
+        <div className="w-full h-[350px]">
           {inventoryChartData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={inventoryChartData} margin={{ left: -10, right: 10, top: 10, bottom: 25 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={inventoryChartData} margin={{ left: 0, right: 0, top: 20, bottom: 20 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
                 <XAxis 
                   dataKey="name" 
-                  fontSize={11} 
+                  fontSize={10} 
                   tickLine={false} 
                   axisLine={false} 
-                  dy={10}
-                  tick={{ fill: '#374151', fontWeight: 600 }}
+                  dy={15}
+                  tick={{ fill: '#6b7280', fontWeight: 600 }}
                   interval={0}
                   angle={-15}
                   textAnchor="end"
                 />
-                <YAxis 
-                  fontSize={11} 
-                  tickLine={false} 
-                  axisLine={false} 
-                  tick={{ fill: '#6b7280' }}
-                />
                 <Tooltip 
-                  contentStyle={{ borderRadius: '16px', border: '1px solid #e5e7eb', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                  cursor={{fill: '#f9fafb'}}
+                  contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
                   formatter={(value: number, name: string) => [
-                    `${formatNumber(value)} ${t("পিস")}`, 
-                    name === "stock" ? t("বর্তমান স্টক") : t("নিরাপদ সীমা")
+                    `${formatNumber(value)} pcs`, 
+                    name === "stock" ? "Stock" : "Min Limit"
                   ]}
                 />
                 <Bar 
                   dataKey="stock" 
                   name="stock" 
                   fill="#4f46e5" 
-                  radius={[6, 6, 0, 0]} 
-                  maxBarSize={45} 
+                  radius={[4, 4, 0, 0]} 
+                  barSize={30} 
                 />
                 <Bar 
                   dataKey="minStock" 
                   name="minStock" 
                   fill="#f43f5e" 
-                  radius={[6, 6, 0, 0]} 
-                  maxBarSize={45} 
+                  radius={[4, 4, 0, 0]} 
+                  barSize={30} 
                 />
               </BarChart>
             </ResponsiveContainer>
           ) : (
-            <div className="h-full flex flex-col items-center justify-center text-center py-12 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-              <Package className="w-12 h-12 text-slate-300 mb-2" />
-              <p className="text-sm font-bold text-slate-500">{t("এই ফিল্টারে কোনো পণ্য পাওয়া যায়নি")}</p>
-              <p className="text-xs text-slate-400 mt-1 font-semibold">{t("সব পণ্য দেখতে \"সব পণ্য\" বোতামে ক্লিক করুন।")}</p>
+            <div className="h-full flex flex-col items-center justify-center text-center py-12 bg-gray-50 rounded-2xl">
+              <Package className="w-12 h-12 text-gray-300 mb-2" />
+              <p className="text-sm font-bold text-gray-500">No products found</p>
             </div>
           )}
         </div>

@@ -1,10 +1,14 @@
-import { LogIn, Eye, EyeOff } from "lucide-react";
+import { LogIn, Eye, EyeOff, Sparkles } from "lucide-react";
 import { signInWithGoogle, loginWithEmail } from "../lib/firebase";
 import { motion } from "motion/react";
 import toast from "react-hot-toast";
 import { useEffect, useState } from "react";
 
-export default function AuthScreen() {
+interface AuthScreenProps {
+  onEnterDemo?: () => void;
+}
+
+export default function AuthScreen({ onEnterDemo }: AuthScreenProps) {
   const [customLogo, setCustomLogo] = useState<string | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -33,6 +37,8 @@ export default function AuthScreen() {
         toast.error("পপআপ ব্লক করা হয়েছে। অনুগ্রহ করে ব্রাউজার সেটিং থেকে অনুমতি দিন।");
       } else if (error.code === 'auth/popup-closed-by-user') {
         toast.error("লগইন উইন্ডোটি বন্ধ করা হয়েছে। অনুগ্রহ করে আবার চেষ্টা করুন।");
+      } else if (error.code === 'auth/network-request-failed' || error.message?.includes('network-request-failed')) {
+        toast.error("নেটওয়ার্ক কানেকশন বা আইফ্রেম রেস্ট্রিকশনের কারণে ফায়ারবেস কানেক্ট করা যায়নি। অনুগ্রহ করে নিচে দেওয়া 'ডেমো মোডে প্রবেশ করুন' বোতামটি চাপুন।", { duration: 8000 });
       } else {
         toast.error("লগইন করতে সমস্যা হয়েছে: " + error.message);
       }
@@ -53,7 +59,12 @@ export default function AuthScreen() {
       const formattedEmail = `${email}@samirabms.com`;
       await loginWithEmail(formattedEmail, password);
     } catch (error: any) {
-      toast.error("লগইন করতে সমস্যা হয়েছে: " + error.message);
+      console.error("Email login error:", error);
+      if (error.code === 'auth/network-request-failed' || error.message?.includes('network-request-failed')) {
+        toast.error("নেটওয়ার্ক কানেকশন বা আইফ্রেম রেস্ট্রিকশনের কারণে ফায়ারবেস কানেক্ট করা যায়নি। অনুগ্রহ করে নিচে দেওয়া 'ডেমো মোডে প্রবেশ করুন' বোতামটি চাপুন।", { duration: 8000 });
+      } else {
+        toast.error("লগইন করতে সমস্যা হয়েছে: " + error.message);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -115,7 +126,7 @@ export default function AuthScreen() {
         <button 
           onClick={handleLogin}
           disabled={isLoading}
-          className="w-full flex items-center justify-center gap-3 bg-white border border-[#DEE2E6] py-3 rounded-xl font-semibold hover:bg-[#F8F9FA] transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+          className="w-full flex items-center justify-center gap-3 bg-white border border-[#DEE2E6] py-3 rounded-xl font-semibold hover:bg-[#F8F9FA] transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed mb-3"
         >
           {isLoading ? "লগইন হচ্ছে..." : (
             <>
@@ -124,6 +135,16 @@ export default function AuthScreen() {
             </>
           )}
         </button>
+
+        {onEnterDemo && (
+          <button 
+            onClick={onEnterDemo}
+            className="w-full flex items-center justify-center gap-2 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 py-3 rounded-xl font-semibold transition-all shadow-sm active:scale-[0.98] cursor-pointer"
+          >
+            <Sparkles className="w-5 h-5 text-indigo-600 animate-pulse" />
+            ডেমো মোডে প্রবেশ করুন (অফলাইন ডেমো)
+          </button>
+        )}
         
         <div className="mt-6 p-4 bg-blue-50 text-blue-700 text-sm rounded-xl text-left border border-blue-100 italic">
           <strong>টিপস:</strong> আপনি যদি মোবাইল বা আইফ্রেম থেকে ব্যবহার করেন, তবে পপআপ ব্লক হতে পারে। সেক্ষেত্রে ব্রাউজারের "New Tab" এ ওপেন করুন।

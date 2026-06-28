@@ -61,12 +61,159 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   throw new Error(JSON.stringify(errInfo));
 }
 
+function getInitialMockData(collectionName: string): any[] {
+  const todayStr = new Date().toISOString().split('T')[0];
+  switch (collectionName) {
+    case "products":
+      return [
+        { id: "p1", name: "Coca-Cola 250ml", SKU: "CC250", price: 25, cost: 18, stock: 1500, category: "Soft Drinks", companyId: "samira-traders", createdAt: { seconds: 1719541200 } },
+        { id: "p2", name: "Sprite 250ml", SKU: "SP250", price: 25, cost: 18, stock: 1200, category: "Soft Drinks", companyId: "samira-traders", createdAt: { seconds: 1719541300 } },
+        { id: "p3", name: "7Up 500ml", SKU: "7U500", price: 45, cost: 34, stock: 800, category: "Soft Drinks", companyId: "samira-traders", createdAt: { seconds: 1719541400 } },
+        { id: "p4", name: "Pran Potato Crackers", SKU: "PPC10", price: 10, cost: 8, stock: 2000, category: "Snacks", companyId: "samira-traders", createdAt: { seconds: 1719541500 } },
+        { id: "p5", name: "Choco Fun Biscuit", SKU: "CFB20", price: 20, cost: 15, stock: 650, category: "Biscuits", companyId: "samira-traders", createdAt: { seconds: 1719541600 } }
+      ];
+    case "customers":
+      return [
+        { id: "c1", name: "Al-Madina Store", contactPerson: "Haji Abdul", phone: "01711223344", address: "Mirpur, Dhaka", routeId: "r1", creditLimit: 50000, balance: 12500, companyId: "samira-traders", createdAt: { seconds: 1719541200 } },
+        { id: "c2", name: "Mayer Doa Grocery", contactPerson: "Rasel Ahmed", phone: "01822334455", address: "Uttara, Dhaka", routeId: "r2", creditLimit: 30000, balance: 4500, companyId: "samira-traders", createdAt: { seconds: 1719541300 } },
+        { id: "c3", name: "Bismillah Departmental", contactPerson: "Kalam Mia", phone: "01933445566", address: "Banani, Dhaka", routeId: "r1", creditLimit: 100000, balance: 0, companyId: "samira-traders", createdAt: { seconds: 1719541400 } }
+      ];
+    case "routes":
+      return [
+        { id: "r1", name: "Mirpur - Section 10 Route", code: "MIR10", active: true, companyId: "samira-traders", createdAt: { seconds: 1719541200 } },
+        { id: "r2", name: "Uttara - Sector 4 Route", code: "UTT04", active: true, companyId: "samira-traders", createdAt: { seconds: 1719541300 } }
+      ];
+    case "users":
+      return [
+        { id: "u1", name: "Samira Admin", email: "samiratraders1@gmail.com", role: "admin", phone: "01700000000", companyId: "samira-traders" },
+        { id: "u2", name: "Abul Kalam (SR)", email: "sr1@samirabms.com", role: "sr", phone: "01711222333", companyId: "samira-traders" },
+        { id: "u3", name: "Manager Alam", email: "manager@samirabms.com", role: "manager", phone: "01722333444", companyId: "samira-traders" }
+      ];
+    case "roles":
+      return [
+        { 
+          id: "admin", 
+          name: "admin", 
+          displayName: "Super Admin", 
+          permissions: ["pos_create", "view_reports", "manage_users"], 
+          allowedViews: ["dashboard", "menu", "inventory", "entities", "customers", "suppliers", "sales", "purchases", "order-mgmt", "settlement", "reports", "finance", "dsr-portal", "admin-approvals", "sub-db", "payment-history", "daily-cashbook", "damage", "advanced-ops", "dms-enterprise", "enterprise-suites", "delivery-route", "super-admin", "roles", "users", "ledger", "unified-ledger", "activity-log", "pos", "sr-order", "sr-order-list"] 
+        },
+        { 
+          id: "manager", 
+          name: "manager", 
+          displayName: "Manager", 
+          permissions: ["pos_create", "view_reports"], 
+          allowedViews: ["dashboard", "menu", "inventory", "customers", "suppliers", "sales", "purchases", "order-mgmt", "settlement", "reports", "finance", "payment-history", "daily-cashbook", "damage", "delivery-route", "ledger", "unified-ledger", "activity-log", "pos", "sr-order", "sr-order-list"] 
+        },
+        { 
+          id: "sr", 
+          name: "sr", 
+          displayName: "Sales Representative", 
+          permissions: ["pos_create"], 
+          allowedViews: ["menu", "sr-order", "sr-order-list", "customers"] 
+        }
+      ];
+    case "summaries":
+      return [
+        { 
+          id: "s1", 
+          srId: "sr1@samirabms.com", 
+          srName: "Abul Kalam (SR)", 
+          routeId: "r1", 
+          date: todayStr, 
+          status: "settled", 
+          salesValue: 18500, 
+          expenses: [{ id: "e1", purpose: "Ferry bill", amount: 150 }], 
+          items: [
+            { productId: "p1", totalPieces: 100, returns: 5, price: 25 }, 
+            { productId: "p4", totalPieces: 200, returns: 10, price: 10 }
+          ],
+          companyId: "samira-traders",
+          createdAt: { seconds: 1719541200 }
+        }
+      ];
+    case "orders":
+      return [
+        { id: "o1", customerId: "c1", customerName: "Al-Madina Store", srId: "sr1@samirabms.com", status: "pending", totalAmount: 4250, items: [{ productId: "p1", qty: 50, price: 25 }], companyId: "samira-traders", createdAt: { seconds: 1719541200 } }
+      ];
+    case "sales":
+      return [
+        { id: "sal1", date: todayStr, customerId: "c1", totalAmount: 1250, items: [{ productId: "p2", qty: 50, price: 25 }], companyId: "samira-traders", createdAt: { seconds: 1719541200 } }
+      ];
+    case "payments":
+      return [
+        { id: "pay1", date: todayStr, customerId: "c1", customerName: "Al-Madina Store", amount: 5000, type: "Cash", memo: "Daily recovery", companyId: "samira-traders", createdAt: { seconds: 1719541200 } }
+      ];
+    case "activity_logs":
+      return [
+        { id: "act1", userEmail: "samiratraders1@gmail.com", actionType: "login", details: "সিস্টেমে লগইন করা হয়েছে (ডেমো মোড)", createdAt: { seconds: 1719541200 } }
+      ];
+    case "companies":
+      return [
+        { id: "samira-traders", name: "Samira Traders", logo: "", address: "Dhaka, Bangladesh", phone: "+8801700000000", email: "samiratraders1@gmail.com", status: "active", createdAt: todayStr }
+      ];
+    case "licenses":
+      return [
+        { id: "lic-samira", companyId: "samira-traders", plan: "Enterprise", status: "active", type: "Lifetime", expiryDate: "2036-12-31" }
+      ];
+    case "subscriptions":
+      return [
+        { id: "sub-samira", companyId: "samira-traders", status: "active" }
+      ];
+    default:
+      return [];
+  }
+}
+
 export function useCollection<T>(collectionName: string) {
   const { companyId, isReadOnly } = useCompany();
   const [data, setData] = useState<T[]>([]);
   const [loading, setLoading] = useState(true);
+  const [authCounter, setAuthCounter] = useState(0);
 
   useEffect(() => {
+    const handleAuthChange = () => {
+      setAuthCounter(prev => prev + 1);
+    };
+    window.addEventListener("auth-state-change", handleAuthChange);
+    return () => window.removeEventListener("auth-state-change", handleAuthChange);
+  }, []);
+
+  useEffect(() => {
+    const isDemoMode = localStorage.getItem("demo_user_session") !== null;
+
+    if (isDemoMode) {
+      setLoading(true);
+      const getLocalData = (): T[] => {
+        const stored = localStorage.getItem(`demo_coll_${collectionName}`);
+        if (stored) {
+          try {
+            return JSON.parse(stored);
+          } catch (e) {
+            console.error(e);
+          }
+        }
+        const initial = getInitialMockData(collectionName);
+        localStorage.setItem(`demo_coll_${collectionName}`, JSON.stringify(initial));
+        return initial as any;
+      };
+
+      setData(getLocalData());
+      setLoading(false);
+
+      const handleLocalChange = (e: Event) => {
+        const customEvent = e as CustomEvent;
+        if (customEvent?.detail && customEvent.detail.collectionName === collectionName) {
+          setData(getLocalData());
+        }
+      };
+
+      window.addEventListener("local-db-change", handleLocalChange);
+      return () => {
+        window.removeEventListener("local-db-change", handleLocalChange);
+      };
+    }
+
     const unsubscribeAuth = auth.onAuthStateChanged((user) => {
       if (!user) {
         setData([]);
@@ -148,9 +295,33 @@ export function useCollection<T>(collectionName: string) {
     });
 
     return () => unsubscribeAuth();
-  }, [collectionName]);
+  }, [collectionName, authCounter, companyId]);
 
   const add = async (item: any) => {
+    const isDemoMode = localStorage.getItem("demo_user_session") !== null;
+    if (isDemoMode) {
+      try {
+        const stored = localStorage.getItem(`demo_coll_${collectionName}`);
+        const items = stored ? JSON.parse(stored) : [];
+        const newId = `local_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+        const newItem = {
+          id: newId,
+          ...item,
+          companyId: "samira-traders",
+          createdBy: "demo-admin",
+          createdAt: { seconds: Math.floor(Date.now() / 1000) }
+        };
+        items.unshift(newItem);
+        localStorage.setItem(`demo_coll_${collectionName}`, JSON.stringify(items));
+        window.dispatchEvent(new CustomEvent("local-db-change", { detail: { collectionName } }));
+        toast.success("সফলভাবে যোগ করা হয়েছে");
+        return newId;
+      } catch (e: any) {
+        toast.error("যোগ করতে সমস্যা: " + e.message);
+        return undefined;
+      }
+    }
+
     try {
       const isSystemCollection = ["companies", "licenses", "subscriptions"].includes(collectionName);
       if (isReadOnly && !isSystemCollection) {
@@ -200,6 +371,28 @@ export function useCollection<T>(collectionName: string) {
   };
 
   const update = async (id: string, item: any) => {
+    const isDemoMode = localStorage.getItem("demo_user_session") !== null;
+    if (isDemoMode) {
+      try {
+        const stored = localStorage.getItem(`demo_coll_${collectionName}`);
+        const items = stored ? JSON.parse(stored) : [];
+        const index = items.findIndex((x: any) => x.id === id);
+        if (index !== -1) {
+          items[index] = {
+            ...items[index],
+            ...item
+          };
+          localStorage.setItem(`demo_coll_${collectionName}`, JSON.stringify(items));
+          window.dispatchEvent(new CustomEvent("local-db-change", { detail: { collectionName } }));
+          toast.success("সফলভাবে আপডেট করা হয়েছে");
+        }
+        return;
+      } catch (e: any) {
+        toast.error("আপডেট করতে সমস্যা: " + e.message);
+        return;
+      }
+    }
+
     try {
       const isSystemCollection = ["companies", "licenses", "subscriptions"].includes(collectionName);
       if (isReadOnly && !isSystemCollection) {
@@ -262,6 +455,22 @@ export function useCollection<T>(collectionName: string) {
   };
 
   const remove = async (id: string) => {
+    const isDemoMode = localStorage.getItem("demo_user_session") !== null;
+    if (isDemoMode) {
+      try {
+        const stored = localStorage.getItem(`demo_coll_${collectionName}`);
+        const items = stored ? JSON.parse(stored) : [];
+        const filtered = items.filter((x: any) => x.id !== id);
+        localStorage.setItem(`demo_coll_${collectionName}`, JSON.stringify(filtered));
+        window.dispatchEvent(new CustomEvent("local-db-change", { detail: { collectionName } }));
+        toast.success("সফলভাবে ডিলিট করা হয়েছে");
+        return;
+      } catch (e: any) {
+        toast.error("ডিলিট করতে সমস্যা: " + e.message);
+        return;
+      }
+    }
+
     console.log(`Attempting to remove doc from ${collectionName} with id: ${id}`);
     try {
       const isSystemCollection = ["companies", "licenses", "subscriptions"].includes(collectionName);
