@@ -12,6 +12,10 @@ export function formatCurrency(amount: number) {
   }).format(amount);
 }
 
+export function formatNumber(val: number) {
+  return new Intl.NumberFormat("bn-BD").format(val);
+}
+
 export function piecesToCartoon(totalPieces: number, cartoonSize: number) {
   const cartons = Math.floor(totalPieces / (cartoonSize || 1));
   const pieces = totalPieces % (cartoonSize || 1);

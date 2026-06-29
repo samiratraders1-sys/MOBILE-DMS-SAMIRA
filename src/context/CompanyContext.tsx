@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { doc, onSnapshot, collection, query, where } from 'firebase/firestore';
+import { doc, onSnapshot, collection, query, where, getDocs } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 import { Company } from '../types';
 
@@ -79,7 +79,7 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       return;
     }
 
-    const unsubscribeAuth = auth.onAuthStateChanged((user) => {
+    const unsubscribeAuth = auth.onAuthStateChanged(async (user) => {
       if (!user) {
         setCompany(null);
         setLicense(null);
@@ -88,7 +88,25 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
         return;
       }
 
-      if (!companyId) {
+      let currentCompanyId = companyId;
+
+      if (!currentCompanyId) {
+        // Try to fetch companyId for the user
+        try {
+          const q = query(collection(db, 'users'), where('email', '==', user.email));
+          const querySnapshot = await getDocs(q);
+          if (!querySnapshot.empty) {
+            currentCompanyId = querySnapshot.docs[0].data().companyId;
+            if (currentCompanyId) {
+              setCompanyId(currentCompanyId);
+            }
+          }
+        } catch (e) {
+          console.error("Error fetching user companyId:", e);
+        }
+      }
+
+      if (!currentCompanyId) {
         setCompany(null);
         setLicense(null);
         setSubscription(null);
@@ -99,7 +117,7 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       setLoadingCompany(true);
 
       // 1. Listen to active Company details
-      const companyRef = doc(db, 'companies', companyId);
+      const companyRef = doc(db, 'companies', currentCompanyId);
       const unsubscribeCompany = onSnapshot(companyRef, (docSnap) => {
         if (docSnap.exists()) {
           setCompany({ id: docSnap.id, ...docSnap.data() } as Company);
@@ -112,7 +130,7 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
       // 2. Listen to active Company License details
       const licensesRef = collection(db, 'licenses');
-      const licenseQuery = query(licensesRef, where('companyId', '==', companyId));
+      const licenseQuery = query(licensesRef, where('companyId', '==', currentCompanyId));
       const unsubscribeLicense = onSnapshot(licenseQuery, (snap) => {
         if (!snap.empty) {
           const lDoc = snap.docs[0];
@@ -126,7 +144,7 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
       // 3. Listen to active Company Subscription details
       const subscriptionsRef = collection(db, 'subscriptions');
-      const subQuery = query(subscriptionsRef, where('companyId', '==', companyId));
+      const subQuery = query(subscriptionsRef, where('companyId', '==', currentCompanyId));
       const unsubscribeSub = onSnapshot(subQuery, (snap) => {
         if (!snap.empty) {
           const sDoc = snap.docs[0];

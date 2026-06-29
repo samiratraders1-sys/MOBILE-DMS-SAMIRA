@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { formatCurrency } from "../lib/utils";
 import { Calendar, TrendingUp, DollarSign, Wallet, ArrowDownRight, ArrowUpRight, HelpCircle, Download, Share2, Printer } from "lucide-react";
+import ProfitTrendChart from "./ProfitTrendChart";
 
 interface PnLProps {
   sales: any[];
@@ -11,15 +12,8 @@ interface PnLProps {
   subDbShipments?: any[];
 }
 
-export default function ProfitLossView({ sales = [], purchases = [], payments = [], summaries = [], products = [], subDbShipments = [] }: PnLProps) {
-  const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
-  const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
-
-  const pnlSummary = useMemo(() => {
-    // 1. Date ranges
-    const startDateTime = startDate + "T00:00:00";
-    const endDateTime = endDate + "T23:59:59";
-
+// Helper to calculate PnL for a specific range
+const calculatePnLForRange = (sales: any[], payments: any[], summaries: any[], products: any[], subDbShipments: any[], startDate: string, endDate: string) => {
     // Standard POS sales filtering (approved only)
     const filteredSales = sales.filter(s => 
       s.date >= startDate && 
@@ -151,7 +145,29 @@ export default function ProfitLossView({ sales = [], purchases = [], payments = 
       totalOthersIncome,
       netProfit
     };
-  }, [sales, summaries, payments, products, startDate, endDate]);
+}
+
+export default function ProfitLossView({ sales = [], purchases = [], payments = [], summaries = [], products = [], subDbShipments = [] }: PnLProps) {
+  const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
+  const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
+
+  const pnlSummary = useMemo(() => {
+    return calculatePnLForRange(sales, payments, summaries, products, subDbShipments, startDate, endDate);
+  }, [sales, summaries, payments, products, startDate, endDate, subDbShipments]);
+
+  const trendData = useMemo(() => {
+    const data = [];
+    for (let i = 5; i >= 0; i--) {
+        const date = new Date();
+        date.setMonth(date.getMonth() - i);
+        const month = date.toISOString().slice(0, 7);
+        const start = `${month}-01`;
+        const end = new Date(date.getFullYear(), date.getMonth() + 1, 0).toISOString().split('T')[0];
+        const res = calculatePnLForRange(sales, payments, summaries, products, subDbShipments, start, end);
+        data.push({ month: date.toLocaleString('default', { month: 'short' }), profit: res.netProfit });
+    }
+    return data;
+  }, [sales, summaries, payments, products, subDbShipments]);
 
   const handleDownloadExcel = () => {
     const headers = ["বিবরণ (Particulars)", "পরিমাণ (Amount)"];
@@ -321,6 +337,14 @@ export default function ProfitLossView({ sales = [], purchases = [], payments = 
             <span className="font-bold text-slate-300">{formatCurrency(pnlSummary.freeVal)}</span>
           </div>
         </div>
+      </div>
+
+      {/* Net Profit Trend Chart */}
+      <div className="bg-white p-6 rounded-3xl border border-gray-150 shadow-xs">
+        <h3 className="font-extrabold text-base text-gray-950 mb-6 flex items-center gap-2">
+          <TrendingUp className="w-5 h-5 text-indigo-600" /> গত ৬ মাসের নিট মুনাফার প্রবণতা (Profit Trend)
+        </h3>
+        <ProfitTrendChart data={trendData} />
       </div>
 
       {/* Detailed Side-by-Side Breakdown */}

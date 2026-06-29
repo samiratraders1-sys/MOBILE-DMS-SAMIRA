@@ -3,8 +3,8 @@ import { useLanguage } from "../context/LanguageContext";
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, AreaChart, Area, Legend
 } from 'recharts';
-import { Package, TrendingUp, Users, ShoppingCart, AlertTriangle, Sparkles, Loader2, ArrowRight, Truck, DollarSign, History, X, Download, FileText, Database, RefreshCw, Plus, BookOpen, Layers, ChevronRight, HelpCircle, ShieldCheck } from "lucide-react";
-import { formatCurrency } from "../lib/utils";
+import { Package, TrendingUp, Users, ShoppingCart, AlertTriangle, Sparkles, Loader2, ArrowRight, Truck, DollarSign, History, X, Download, FileText, Database, RefreshCw, Plus, BookOpen, Layers, ChevronRight, HelpCircle, ShieldCheck, Wallet } from "lucide-react";
+import { formatCurrency, formatNumber } from "../lib/utils";
 import { motion, AnimatePresence } from "motion/react";
 import { jsPDF } from "jspdf";
 import toast from "react-hot-toast";
@@ -251,7 +251,7 @@ export default function DashboardView({ products, summaries, customers, routes, 
   const isManagerOrAdmin = role === "admin" || role === "manager";
   
   // Calculations for KPI grid
-  const { totalSalesValue, netProfit, totalExpenses, totalReturnVal, totalFreeCount, totalDiscountCount } = useMemo(() => {
+  const kpiValues = useMemo(() => {
     let totalSalesValue = 0;
     let totalReturnVal = 0;
     let totalExpenses = 0;
@@ -284,9 +284,12 @@ export default function DashboardView({ products, summaries, customers, routes, 
     });
 
     const netProfit = totalSalesValue - totalCostOfSales - totalExpenses;
+    const profitMargin = totalSalesValue > 0 ? (netProfit / totalSalesValue) * 100 : 0;
 
-    return { totalSalesValue, netProfit, totalExpenses, totalReturnVal, totalFreeCount, totalDiscountCount };
+    return { totalSalesValue, netProfit, profitMargin, totalExpenses, totalReturnVal, totalFreeCount, totalDiscountCount };
   }, [products, summaries, sales]);
+
+  const { totalSalesValue, netProfit, profitMargin, totalExpenses, totalReturnVal, totalFreeCount, totalDiscountCount } = kpiValues;
 
   const currentYearMonthPrefix = useMemo(() => {
     const now = new Date();
@@ -390,8 +393,9 @@ export default function DashboardView({ products, summaries, customers, routes, 
       { label: "মোট ডিস্কাউন্ট ছাড়", value: formatCurrency(totalDiscountCount), icon: DollarSign, color: "text-sky-600", bg: "bg-sky-50/50" },
       { label: "মোট খরচ", value: formatCurrency(totalExpenses), icon: ShoppingCart, color: "text-yellow-600", bg: "bg-yellow-50/50" },
       { label: "নিট প্রফিট", value: formatCurrency(netProfit), icon: Sparkles, color: "text-emerald-600", bg: "bg-emerald-50/50" },
+      { label: "প্রফিট মার্জিন", value: `${formatNumber(profitMargin.toFixed(1))}%`, icon: TrendingUp, color: "text-teal-600", bg: "bg-teal-50/50" },
     ];
-  }, [products, customers, routes, isManagerOrAdmin, totalSalesValue, totalReturnVal, totalFreeCount, totalDiscountCount, totalExpenses, netProfit]);
+  }, [products, customers, routes, isManagerOrAdmin, totalSalesValue, totalReturnVal, totalFreeCount, totalDiscountCount, totalExpenses, netProfit, profitMargin]);
 
   const quickAccessButtons = useMemo(() => {
     const buttons = [
@@ -878,6 +882,37 @@ export default function DashboardView({ products, summaries, customers, routes, 
         </div>
       </header>
 
+      {/* Quick Actions - Moved here for better visibility */}
+      <div className="bg-white rounded-3xl border border-gray-100 shadow-sm p-6">
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h4 className="font-bold text-gray-950 text-sm">Quick Actions</h4>
+            <p className="text-xs text-gray-500 mt-0.5">Frequent operational tasks</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+          {[
+            { label: "বিক্রয়", icon: ShoppingCart, view: "orders" },
+            { label: "ক্রয়", icon: Package, view: "purchase" },
+            { label: "কাস্টমার", icon: Users, view: "customers" },
+            { label: "সাপ্লায়ার", icon: Truck, view: "suppliers" },
+            { label: "পেমেন্ট", icon: DollarSign, view: "payment-history" },
+            { label: "পেমেন্ট রিসিভ", icon: Wallet, view: "payment-history" },
+            { label: "ট্রান্সফার", icon: RefreshCw, view: "finance" },
+          ].map((action) => (
+            <button
+              key={action.label}
+              onClick={() => setActiveView(action.view)}
+              className="flex flex-col items-center gap-2 p-3 bg-white hover:bg-emerald-50 text-gray-700 hover:text-emerald-700 rounded-xl transition-all border border-gray-100 shadow-sm cursor-pointer"
+            >
+              <action.icon className="w-5 h-5" />
+              <span className="text-[10px] font-bold">{action.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Periodic Backup Reminder Alert */}
       {isBackupOverdue && (
         <motion.div
@@ -987,8 +1022,8 @@ export default function DashboardView({ products, summaries, customers, routes, 
           </button>
         </div>
       </motion.div>
-      {/* New Enterprise KPI Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6 mb-8">
+      {/* New Enterprise KPI Grid - Compact & Attractive */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3 mb-6">
         {[
           { label: "Total Sales", value: formatCurrency(totalSalesValue), icon: TrendingUp, color: "text-blue-600", bg: "bg-blue-50" },
           { label: "Revenue", value: formatCurrency(netProfit), icon: DollarSign, color: "text-emerald-600", bg: "bg-emerald-50" },
@@ -997,25 +1032,15 @@ export default function DashboardView({ products, summaries, customers, routes, 
           { label: "Collection", value: formatCurrency(summaries.reduce((acc, s) => acc + (s.payment || 0), 0)), icon: Database, color: "text-sky-600", bg: "bg-sky-50" },
           { label: "Outstanding Due", value: formatCurrency(customers.reduce((acc, c) => acc + (c.due || 0), 0)), icon: AlertTriangle, color: "text-red-600", bg: "bg-red-50" },
         ].map((stat, i) => (
-          <motion.div 
-            key={stat.label}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.05 }}
-            className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer flex flex-col gap-3 group"
-          >
-            <div className={`p-2.5 rounded-lg ${stat.bg} ${stat.color} w-fit`}>
-              <stat.icon className="w-5 h-5" />
+          <div key={stat.label} className="bg-white p-3 rounded-2xl border border-gray-100 shadow-sm flex items-center gap-3">
+            <div className={`p-2 rounded-xl ${stat.bg} ${stat.color}`}>
+              <stat.icon className="w-4 h-4" />
             </div>
             <div>
-              <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">{stat.label}</p>
-              <p className="text-xl font-black text-gray-950 mt-0.5">{stat.value}</p>
+              <p className="text-[9px] font-extrabold text-gray-500 uppercase tracking-widest">{stat.label}</p>
+              <p className="text-sm font-black text-gray-950 leading-none mt-0.5">{stat.value}</p>
             </div>
-            <div className="pt-2 border-t border-gray-100 flex items-center justify-between text-[10px] font-bold">
-               <span className="text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">↑ 2.5%</span>
-               <span className="text-gray-400">vs month</span>
-            </div>
-          </motion.div>
+          </div>
         ))}
       </div>
 
@@ -1103,34 +1128,6 @@ export default function DashboardView({ products, summaries, customers, routes, 
         <div className="min-h-[200px]">
           {hubActiveTab === "workspace" && (
             <div className="space-y-6">
-              <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
-                <div className="flex items-center justify-between mb-6">
-                  <div>
-                    <h4 className="font-bold text-gray-950 text-sm">Quick Actions</h4>
-                    <p className="text-xs text-gray-500 mt-0.5">Frequent operational tasks</p>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-                  {[
-                    { label: "New Sale", icon: ShoppingCart, view: "orders" },
-                    { label: "Purchase", icon: Package, view: "purchases" },
-                    { label: "Customer", icon: Users, view: "customers" },
-                    { label: "Supplier", icon: Truck, view: "suppliers" },
-                    { label: "Payment", icon: DollarSign, view: "payments" },
-                    { label: "Transfer", icon: RefreshCw, view: "transfers" },
-                  ].map((action) => (
-                    <button
-                      key={action.label}
-                      onClick={() => setActiveView(action.view)}
-                      className="flex flex-col items-center justify-center gap-2 p-4 bg-gray-50 hover:bg-emerald-50 text-gray-700 hover:text-emerald-700 rounded-xl transition-all border border-gray-100"
-                    >
-                      <action.icon className="w-5 h-5" />
-                      <span className="text-[10px] font-bold">{action.label}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-6">
                 {/* Step 1: Orders */}
@@ -1401,6 +1398,24 @@ export default function DashboardView({ products, summaries, customers, routes, 
                 <div>
                   <h4 className="text-sm font-black text-slate-900 group-hover:text-emerald-600 transition-all">টাকা পরিশোধ ও ঋণ লেনদেন (Payments, Loans & Bank Fund)</h4>
                   <p className="text-xs font-semibold text-slate-400 mt-1 leading-relaxed">কোম্পানিকে ঋণ পরিশোধ, স্টাফ এডভান্স, ব্যাংকে টাকা জমা এবং বিবিধ খরচের ভাউচার এন্ট্রি।</p>
+                </div>
+              </motion.div>
+
+              {/* Payment Receive Entry */}
+              <motion.div
+                whileHover={{ y: -4, scale: 1.01 }}
+                onClick={() => setActiveView("payment-history")}
+                className="bg-white p-6 rounded-2xl border border-slate-200 hover:border-emerald-300 hover:shadow-md cursor-pointer transition-all flex flex-col justify-between group"
+              >
+                <div className="flex justify-between items-start mb-4">
+                  <div className="p-2.5 bg-emerald-50 text-emerald-600 rounded-xl">
+                    <Wallet className="w-5 h-5" />
+                  </div>
+                  <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 text-[10px] font-black rounded-lg">রিসিভ এন্ট্রি</span>
+                </div>
+                <div>
+                  <h4 className="text-sm font-black text-slate-900 group-hover:text-emerald-600 transition-all">পেমেন্ট রিসিভ (Payment Receive)</h4>
+                  <p className="text-xs font-semibold text-slate-400 mt-1 leading-relaxed">কাস্টমার বা অন্য কোনো পক্ষ থেকে আসা পেমেন্ট রিসিভ করুন।</p>
                 </div>
               </motion.div>
             </div>

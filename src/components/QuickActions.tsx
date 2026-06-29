@@ -54,7 +54,7 @@ export default function QuickActions({
   role,
 }: QuickActionsProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [activeModal, setActiveModal] = useState<"sale" | "purchase" | "expense" | null>(null);
+  const [activeModal, setActiveModal] = useState<"sale" | "purchase" | "expense" | "payment" | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   // ----------------------------------------------------
@@ -89,6 +89,10 @@ export default function QuickActions({
   const [expMethod, setExpMethod] = useState("Cash");
   const [expAccount, setExpAccount] = useState("");
   const [expEntity, setExpEntity] = useState("");
+  const [paymentAmount, setPaymentAmount] = useState("");
+  const [paymentCustomer, setPaymentCustomer] = useState("");
+  const [paymentAccount, setPaymentAccount] = useState("");
+  const [paymentDescription, setPaymentDescription] = useState("");
   const [generatedReceipt, setGeneratedReceipt] = useState<any>(null);
 
   // Auto-initialize account selects if data exists
@@ -1313,6 +1317,53 @@ export default function QuickActions({
             setExpEntity("");
           }} 
         />
+      )}
+
+      {/* Payment Receive Modal */}
+      {activeModal === "payment" && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl">
+            <h3 className="font-bold text-lg mb-4">পেমেন্ট রিসিভ করুন</h3>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              setSubmitting(true);
+              try {
+                await addPayment({
+                  amount: Number(paymentAmount),
+                  customer: paymentCustomer,
+                  account: paymentAccount,
+                  description: paymentDescription,
+                  date: new Date().toISOString(),
+                  type: "receive",
+                  user: user?.email
+                });
+                toast.success("পেমেন্ট রিসিভ হয়েছে!");
+                setActiveModal(null);
+                setPaymentAmount("");
+                setPaymentDescription("");
+              } catch (err) {
+                toast.error("ভুল হয়েছে!");
+              } finally {
+                setSubmitting(false);
+              }
+            }}>
+              <input type="number" placeholder="পরিমাণ" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} required className="w-full p-2 border rounded-lg mb-2" />
+              <select value={paymentCustomer} onChange={(e) => setPaymentCustomer(e.target.value)} required className="w-full p-2 border rounded-lg mb-2">
+                <option value="">কাস্টমার সিলেক্ট করুন</option>
+                {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+              <select value={paymentAccount} onChange={(e) => setPaymentAccount(e.target.value)} required className="w-full p-2 border rounded-lg mb-2">
+                <option value="">অ্যাকাউন্ট সিলেক্ট করুন</option>
+                {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+              <input type="text" placeholder="বিবরণ" value={paymentDescription} onChange={(e) => setPaymentDescription(e.target.value)} className="w-full p-2 border rounded-lg mb-4" />
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setActiveModal(null)} className="flex-1 p-2 bg-gray-100 rounded-lg">বাতিল</button>
+                <button type="submit" disabled={submitting} className="flex-1 p-2 bg-emerald-600 text-white rounded-lg">{submitting ? "সেভ হচ্ছে..." : "রিসিভ করুন"}</button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

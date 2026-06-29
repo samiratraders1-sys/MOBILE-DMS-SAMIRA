@@ -15,9 +15,15 @@ interface ActivityLogProps {
 export default function ActivityLogView({ logs, onClearLogs, role, userEmail }: ActivityLogProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedType, setSelectedType] = useState<"all" | "delete" | "approve" | "reject" | "inventory">("all");
+  const [selectedUser, setSelectedUser] = useState<string>("all");
   const [clearing, setClearing] = useState(false);
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+
+  const uniqueUsers = useMemo(() => {
+    const users = new Set(logs.map(log => log.userEmail).filter(Boolean));
+    return Array.from(users);
+  }, [logs]);
 
   // Parse temporal timestamps resiliently
   const getLogDateObject = (createdAt: any): Date | null => {
@@ -88,7 +94,10 @@ export default function ActivityLogView({ logs, onClearLogs, role, userEmail }: 
 
       if (!matchesSearch) return false;
 
-      // 2. Action Type Filter Groupings
+      // 2. User filter
+      if (selectedUser !== "all" && log.userEmail !== selectedUser) return false;
+
+      // 3. Action Type Filter Groupings
       let matchesType = true;
       if (selectedType === "delete") {
         matchesType = log.actionType === "delete_record";
@@ -101,7 +110,7 @@ export default function ActivityLogView({ logs, onClearLogs, role, userEmail }: 
       }
       if (!matchesType) return false;
 
-      // 3. Date Range filter (inclusive)
+      // 4. Date Range filter (inclusive)
       const logDate = getLogDateObject(log.createdAt);
       if (startDate || endDate) {
         if (!logDate) return false;
@@ -297,6 +306,16 @@ export default function ActivityLogView({ logs, onClearLogs, role, userEmail }: 
               className="w-full pl-11 pr-4 py-3 border rounded-2xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 focus:outline-none bg-slate-50/50 text-sm font-semibold text-slate-800 placeholder-slate-400 transition-all"
             />
           </div>
+          <select
+            value={selectedUser}
+            onChange={(e) => setSelectedUser(e.target.value)}
+            className="py-3 px-4 border rounded-2xl bg-slate-50/50 text-sm font-semibold text-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 focus:outline-none transition-all cursor-pointer"
+          >
+            <option value="all">সব ইউজার</option>
+            {uniqueUsers.map(user => (
+              <option key={user} value={user}>{user}</option>
+            ))}
+          </select>
           <div className="flex flex-wrap gap-2">
             <button
               onClick={() => setSelectedType("all")}
