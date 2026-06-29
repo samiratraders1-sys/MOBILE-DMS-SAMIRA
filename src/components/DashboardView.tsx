@@ -15,6 +15,8 @@ interface DashboardProps {
   products: any[];
   summaries: any[];
   customers: any[];
+  suppliers: any[];
+  purchases: any[];
   routes: any[];
   payments?: any[];
   sales?: any[];
@@ -24,7 +26,7 @@ interface DashboardProps {
   allowedViews?: string[];
 }
 
-export default function DashboardView({ products, summaries, customers, routes, payments = [], sales = [], activityLogs = [], setActiveView, role, allowedViews }: DashboardProps) {
+export default function DashboardView({ products, summaries, customers, suppliers, purchases, routes, payments = [], sales = [], activityLogs = [], setActiveView, role, allowedViews }: DashboardProps) {
   const { language, t, formatNumber } = useLanguage();
   const [aiInsight, setAiInsight] = useState<string | null>(null);
   const [loadingAi, setLoadingAi] = useState(false);
@@ -852,6 +854,15 @@ export default function DashboardView({ products, summaries, customers, routes, 
     }
   };
 
+  const srmMetrics = useMemo(() => {
+    const activeSuppliers = suppliers.length;
+    const pendingPurchases = purchases.filter(p => p.status === 'pending').length;
+    const totalOutstanding = payments
+      .filter(p => p.type === 'out' && (p.status === 'pending' || !p.status))
+      .reduce((sum: number, p: any) => sum + (p.amount || 0), 0);
+    return { activeSuppliers, pendingPurchases, totalOutstanding };
+  }, [suppliers, purchases, payments]);
+
   return (
     <div className="space-y-8 p-8 bg-gray-50 min-h-screen">
       <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 bg-white p-6 rounded-3xl border border-gray-100 shadow-sm">
@@ -881,6 +892,31 @@ export default function DashboardView({ products, summaries, customers, routes, 
           )}
         </div>
       </header>
+      
+      {/* SRM Summary Card */}
+      <div className="bg-white rounded-3xl border border-gray-100 shadow-sm p-6">
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h4 className="font-bold text-gray-950 text-sm">Supplier Relationship Management (SRM)</h4>
+            <p className="text-xs text-gray-500 mt-0.5">Key supplier metrics and status</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="p-4 bg-indigo-50 rounded-2xl border border-indigo-100">
+            <p className="text-xs text-indigo-700 font-bold">Total Active Suppliers</p>
+            <p className="text-2xl font-black text-indigo-950 mt-1">{srmMetrics.activeSuppliers}</p>
+          </div>
+          <div className="p-4 bg-amber-50 rounded-2xl border border-amber-100">
+            <p className="text-xs text-amber-700 font-bold">Pending Purchase Orders</p>
+            <p className="text-2xl font-black text-amber-950 mt-1">{srmMetrics.pendingPurchases}</p>
+          </div>
+          <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-100">
+            <p className="text-xs text-emerald-700 font-bold">Total Outstanding Payments</p>
+            <p className="text-2xl font-black text-emerald-950 mt-1">{formatCurrency(srmMetrics.totalOutstanding)}</p>
+          </div>
+        </div>
+      </div>
 
       {/* Quick Actions - Moved here for better visibility */}
       <div className="bg-white rounded-3xl border border-gray-100 shadow-sm p-6">

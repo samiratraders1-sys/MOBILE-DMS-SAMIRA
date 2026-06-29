@@ -608,6 +608,8 @@ export default function App() {
             products={products.data} 
             summaries={summaries.data} 
             customers={customers.data} 
+            suppliers={suppliers.data}
+            purchases={purchases.data}
             routes={routes.data} 
             payments={payments.data}
             sales={sales.data}
@@ -804,6 +806,8 @@ export default function App() {
         return (
           <SupplierManagementView
             suppliers={suppliers.data}
+            purchases={purchases.data}
+            payments={payments.data}
             addSupplier={async (item) => { await suppliers.add(item); }}
             updateSupplier={async (id, item) => { await suppliers.update(id, item); }}
             removeSupplier={async (id) => { await suppliers.remove(id); }}
@@ -1044,6 +1048,8 @@ export default function App() {
             products={products.data} 
             summaries={summaries.data} 
             customers={customers.data} 
+            suppliers={suppliers.data}
+            purchases={purchases.data}
             routes={routes.data} 
             payments={payments.data}
             sales={sales.data}

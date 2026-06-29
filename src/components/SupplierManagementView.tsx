@@ -1,23 +1,36 @@
 import React, { useState } from "react";
-import { Package, Phone, MapPin, Search, Plus, Trash2, Edit2, X, ClipboardList, DollarSign } from "lucide-react";
+import { Package, Phone, MapPin, Search, Plus, Trash2, Edit2, X, ClipboardList, DollarSign, MessageSquare } from "lucide-react";
 import { Supplier } from "../types";
 import toast from "react-hot-toast";
 
 interface SupplierManagementViewProps {
   suppliers: Supplier[];
+  purchases: any[];
+  payments: any[];
   addSupplier: (supplier: Omit<Supplier, 'id'>) => Promise<any>;
   updateSupplier: (id: string, supplier: Supplier) => Promise<void>;
   removeSupplier: (id: string) => Promise<void>;
   addPayment: (payment: any) => Promise<any>;
 }
 
-export default function SupplierManagementView({ suppliers, addSupplier, updateSupplier, removeSupplier, addPayment }: SupplierManagementViewProps) {
+export default function SupplierManagementView({ suppliers, purchases, payments, addSupplier, updateSupplier, removeSupplier, addPayment }: SupplierManagementViewProps) {
   const [search, setSearch] = useState("");
   const [showAdd, setShowAdd] = useState(false);
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
   const [selectedSupplier, setSelectedSupplier] = useState<Supplier | null>(null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedSupplierForPayment, setSelectedSupplierForPayment] = useState<Supplier | null>(null);
+
+  const handleAddNote = async (note: string) => {
+    if (!selectedSupplier) return;
+    const updatedNotes = [...(selectedSupplier.notes || []), note];
+    await updateSupplier(selectedSupplier.id, { ...selectedSupplier, notes: updatedNotes });
+    setSelectedSupplier({ ...selectedSupplier, notes: updatedNotes });
+    toast.success("নোট যোগ করা হয়েছে");
+  };
+
+  const supplierPurchases = purchases.filter(p => p.supplierId === selectedSupplier?.id);
+  const supplierTransactions = payments.filter(p => p.supplierId === selectedSupplier?.id);
 
   const filteredSuppliers = suppliers.filter(s => s.name.toLowerCase().includes(search.toLowerCase()));
 
@@ -151,8 +164,42 @@ export default function SupplierManagementView({ suppliers, addSupplier, updateS
                   </div>
 
                   <div className="space-y-4">
-                    <h3 className="font-bold flex items-center gap-2"><DollarSign size={18}/> পূর্ববর্তী লেনদেন (Transaction History)</h3>
-                    <p className="text-sm text-gray-500 italic">কোনো লেনদেনের ইতিহাস পাওয়া যায়নি।</p>
+                    <h3 className="font-bold flex items-center gap-2"><Package size={18}/> ক্রয় ইতিহাস (Purchase History) ({supplierPurchases.length})</h3>
+                    {supplierPurchases.map((p, idx) => (
+                        <div key={idx} className="flex justify-between border-b py-2 text-sm">
+                            <span>{new Date(p.date).toLocaleDateString()}</span>
+                            <span>{p.totalAmount} টাকা</span>
+                        </div>
+                    ))}
+                  </div>
+
+                  <div className="space-y-4">
+                    <h3 className="font-bold flex items-center gap-2"><DollarSign size={18}/> লেনদেন (Transaction History) ({supplierTransactions.length})</h3>
+                    {supplierTransactions.map((t, idx) => (
+                        <div key={idx} className="flex justify-between border-b py-2 text-sm">
+                            <span>{new Date(t.date).toLocaleDateString()}</span>
+                            <span>{t.amount} টাকা</span>
+                        </div>
+                    ))}
+                  </div>
+
+                  <div className="space-y-4">
+                    <h3 className="font-bold flex items-center gap-2"><MessageSquare size={18}/> যোগাযোগ (Communications)</h3>
+                    <div className="space-y-2">
+                        {selectedSupplier.notes?.map((note, idx) => (
+                            <div key={idx} className="bg-gray-50 p-2 rounded text-sm">{note}</div>
+                        ))}
+                        <div className="flex gap-2">
+                            <input type="text" id="newNote" placeholder="নতুন নোট..." className="flex-1 p-2 border rounded-lg text-sm" />
+                            <button onClick={() => {
+                                const input = document.getElementById("newNote") as HTMLInputElement;
+                                if (input.value) {
+                                    handleAddNote(input.value);
+                                    input.value = "";
+                                }
+                            }} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold">যোগ করুন</button>
+                        </div>
+                    </div>
                   </div>
               </div>
           </div>

@@ -166,7 +166,8 @@ function getInitialMockData(collectionName: string): any[] {
 }
 
 export function useCollection<T>(collectionName: string) {
-  const { companyId, isReadOnly } = useCompany();
+  const { companyId: contextCompanyId, isReadOnly } = useCompany();
+  const companyId = contextCompanyId || localStorage.getItem("companyId");
   const [data, setData] = useState<T[]>([]);
   const [loading, setLoading] = useState(true);
   const [authCounter, setAuthCounter] = useState(0);

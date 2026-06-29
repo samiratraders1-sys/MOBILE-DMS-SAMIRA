@@ -66,4 +66,5 @@ export interface Supplier {
     productName: string;
     currentPrice: number;
   }[];
+  notes?: string[];
 }
