@@ -3,6 +3,7 @@ import { Plus, Trash2, ShoppingCart, Search, Send, Printer, Loader2, XCircle, Sp
 import toast from "react-hot-toast";
 import ThermalPrintTemplate from "./ThermalPrintTemplate";
 import { getGroupColors } from "../lib/utils";
+import { useFormAutoSave } from "../hooks/useFormAutoSave";
 
 interface OrderProps {
   products: any[];
@@ -30,6 +31,27 @@ export default function SROrderView({ products, customers, routes, staff, addOrd
   const [sfaActiveTab, setSfaActiveTab] = useState<"schemes" | "suggested" | "credit">("schemes");
   const [geofenceOk, setGeofenceOk] = useState<boolean>(true);
   const [geoCoords, setGeoCoords] = useState<{ lat: number; lng: number } | null>(null);
+
+  // Auto-save form values to IndexedDB
+  const formStateToSave = React.useMemo(() => ({
+    selectedRoute,
+    selectedCustomer,
+    selectedSR,
+    cart,
+    customDiscount
+  }), [selectedRoute, selectedCustomer, selectedSR, cart, customDiscount]);
+
+  const { saveStatus, clearState } = useFormAutoSave(
+    "sr-order-form",
+    formStateToSave,
+    (saved) => {
+      if (saved.selectedRoute !== undefined) setSelectedRoute(saved.selectedRoute);
+      if (saved.selectedCustomer !== undefined) setSelectedCustomer(saved.selectedCustomer);
+      if (saved.selectedSR !== undefined) setSelectedSR(saved.selectedSR);
+      if (saved.cart !== undefined) setCart(saved.cart);
+      if (saved.customDiscount !== undefined) setCustomDiscount(saved.customDiscount);
+    }
+  );
 
   // Quick Customer Add Modal States
   const [showAddCustomerModal, setShowAddCustomerModal] = useState(false);
@@ -191,6 +213,7 @@ export default function SROrderView({ products, customers, routes, staff, addOrd
       setCart([]);
       setSelectedCustomer("");
       setCustomDiscount(0);
+      await clearState();
       toast.success("অর্ডার সফলভাবে জমা হয়েছে");
     } catch (e: any) {
       console.error("Order save error:", e);
@@ -216,10 +239,30 @@ export default function SROrderView({ products, customers, routes, staff, addOrd
       {/* Left: Product Selection */}
       <div className="lg:col-span-2 space-y-6">
         <div className="bg-white p-6 rounded-3xl border border-[#E9ECEF] shadow-sm">
-          <h2 className="text-xl font-bold mb-4 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <ShoppingCart className="w-6 h-6 text-blue-600" />
-              এসআর অর্ডার (SR Order Entry)
+          <h2 className="text-xl font-bold mb-4 flex items-center justify-between gap-2 flex-wrap sm:flex-nowrap">
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-2">
+                <ShoppingCart className="w-6 h-6 text-blue-600" />
+                এসআর অর্ডার (SR Order Entry)
+              </div>
+              {saveStatus === "saving" && (
+                <span className="text-xs font-normal text-amber-600 bg-amber-50 border border-amber-100 px-2 py-0.5 rounded-full flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" />
+                  অটো-সেভ হচ্ছে...
+                </span>
+              )}
+              {saveStatus === "saved" && (
+                <span className="text-xs font-normal text-emerald-600 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-full flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
+                  অটো-সেভ সক্রিয়
+                </span>
+              )}
+              {saveStatus === "error" && (
+                <span className="text-xs font-normal text-rose-600 bg-rose-50 border border-rose-100 px-2 py-0.5 rounded-full flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 bg-rose-500 rounded-full" />
+                  অটো-সেভ ত্রুটি
+                </span>
+              )}
             </div>
             <button onClick={() => window.print()} className="px-4 py-2 bg-gray-100 text-gray-600 rounded-xl font-bold text-sm border border-gray-200 hover:bg-gray-200 transition-all font-bold flex items-center gap-2">
               <Printer className="w-4 h-4" /> প্রিন্ট
@@ -636,6 +679,7 @@ export default function SROrderView({ products, customers, routes, staff, addOrd
                 onClick={() => {
                   setCart([]);
                   setCustomDiscount(0);
+                  clearState();
                 }}
                 className="text-xs font-bold text-rose-500 hover:text-rose-700 font-bold"
               >

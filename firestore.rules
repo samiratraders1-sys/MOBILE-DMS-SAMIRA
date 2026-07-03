@@ -1,78 +1,14 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Phase 3: Primitive Definition
-    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
-    function incoming() { return request.resource.data; }
-    function existing() { return resource.data; }
-    function isSignedIn() { return request.auth != null; }
-    function isVerified() { return request.auth.token.email_verified == true; }
-    
-    // Admin override (Explicitly linked to verified admin)
-    function isAdmin() { 
-      return isSignedIn() && isVerified() && 
-             exists(/databases/$(database)/documents/admins/$(request.auth.uid)); 
+    // Check if the user is authenticated
+    function isSignedIn() {
+      return request.auth != null;
     }
 
-    // Company helper: Check if document belongs to company
-    function belongsToCompany(data) {
-      return isAdmin() || (isSignedIn() && data.companyId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.companyId);
-    }
-
-    // RBAC Helpers: Role/Permission lookups
-    function getUserRoleDoc() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid));
-    }
-    
-    function hasPermission(permissionId) {
-      let userRole = getUserRoleDoc().data.roleId;
-      let roleDoc = get(/databases/$(database)/documents/roles/$(userRole));
-      return roleDoc.data.permissions.hasAny([permissionId]);
-    }
-
-    // Default: Deny All
+    // Allow any authenticated user to read and write any document
     match /{document=**} {
-      allow read, write: if false;
-    }
-
-    // USERS: Read own, Admin can read/write all
-    match /users/{userId} {
-      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
-      allow write: if isAdmin();
-    }
-
-    // ROLES: Admin can read/write
-    match /roles/{roleId} {
-      allow read: if isSignedIn();
-      allow write, delete: if isSignedIn();
-    }
-    
-    // PERMISSIONS: Admin can read/write
-    match /permissions/{permissionId} {
-        allow read: if isSignedIn();
-        allow write: if isAdmin();
-    }
-
-    // COMPANIES: Only admin can manage companies
-    match /companies/{companyId} {
-      allow read: if isSignedIn();
-      allow write: if isAdmin();
-    }
-
-    // OPERATIONS: Use role-based permissions where possible
-    match /sales/{saleId} {
-      allow read: if belongsToCompany(resource.data);
-      allow write: if isAdmin() || (belongsToCompany(incoming()) && hasPermission('pos_create'));
-    }
-    match /orders/{orderId} {
-      allow read: if belongsToCompany(resource.data);
-      allow write: if isAdmin() || (belongsToCompany(incoming()) && (hasPermission('pos_create') || (getUserRoleDoc() != null && getUserRoleDoc().data.roleId == 'sr')));
-    }
-    
-    // Catch-all for other collections: Enforce companyId
-    match /{collection}/{document=**} {
-      allow read: if belongsToCompany(resource.data);
-      allow write: if isAdmin() || (belongsToCompany(incoming()) && getUserRoleDoc().data.role == 'manager');
+      allow read, write: if isSignedIn();
     }
   }
 }

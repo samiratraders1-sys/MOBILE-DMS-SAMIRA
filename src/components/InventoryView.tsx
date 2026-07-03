@@ -7,6 +7,7 @@ import toast from "react-hot-toast";
 import MultiSelect from "./MultiSelect";
 import { calculateStock, recordStockMovement } from "../lib/inventoryEngine";
 import { StockMovement, MovementType } from "../lib/stockMovement";
+import { useConfirm } from "../context/ConfirmContext";
 
 interface InventoryProps {
   products: any[];
@@ -58,6 +59,8 @@ export default function InventoryView({ products, add, update, remove, suppliers
   // Voice search states
   const [isListening, setIsListening] = useState(false);
   const [voiceLang, setVoiceLang] = useState<"bn-BD" | "en-US">("bn-BD");
+
+  const { confirmDelete } = useConfirm();
 
   const handleVoiceSearch = () => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -131,16 +134,30 @@ export default function InventoryView({ products, add, update, remove, suppliers
   const handleInlineSave = async (id: string) => {
     setIsSavingInline(true);
     try {
-      const prevStock = calculateStock(movements, id);
+      const origProduct = products.find(p => p.id === id);
+      const prevStock = origProduct ? Number(origProduct.stock) || 0 : 0;
       const nextStock = Number(inlineStock);
 
-      // We still update the product's other details, but stop updating stock directly
       await update(id, {
         price: Number(inlinePrice),
-        cost: Number(inlineCost)
+        cost: Number(inlineCost),
+        stock: nextStock
       });
 
       if (prevStock !== nextStock) {
+        if (stockAdjustments && stockAdjustments.add) {
+          await stockAdjustments.add({
+            productId: id,
+            productName: origProduct?.name || "N/A",
+            sku: origProduct?.sku || "N/A",
+            previousStock: prevStock,
+            newStock: nextStock,
+            quantityChanged: nextStock - prevStock,
+            reason: "ইনলাইন এডিট সমন্বয় (Inline Edit Adjustment)",
+            date: new Date().toISOString(),
+            user: user?.email || "Unknown"
+          });
+        }
         await recordStockMovement(id, 'ADJUSTMENT', nextStock - prevStock, id);
       }
 
@@ -180,10 +197,10 @@ export default function InventoryView({ products, add, update, remove, suppliers
     (p.name.toLowerCase().includes(search.toLowerCase()) || 
     (p.sku && p.sku.toLowerCase().includes(search.toLowerCase()))) &&
     (selectedCategories.length === 0 || 
-        (selectedCategories.includes('LOW_STOCK') && calculateStock(movements, p.id) <= (p.minStockLevel || 5)) ||
+        (selectedCategories.includes('LOW_STOCK') && (p.stock || 0) <= (p.minStockLevel || 5)) ||
         selectedCategories.includes(p.category || "General")
     ) &&
-    (selectedSuppliers.length === 0 || selectedSuppliers.includes(p.supplierId))
+    (selectedSuppliers.length === 0 || selectedSuppliers.includes(p.supplierId || ""))
   );
 
   const movements = useMemo(() => {
@@ -210,12 +227,12 @@ export default function InventoryView({ products, add, update, remove, suppliers
 
   // Calculate total values
   const totalValue = filtered.reduce((acc, p) => {
-    const stock = calculateStock(movements, p.id);
+    const stock = Number(p.stock) || 0;
     return acc + (Math.max(0, stock) * (Number(p.price) || 0));
   }, 0);
   
   const totalCostValue = filtered.reduce((acc, p) => {
-    const stock = calculateStock(movements, p.id);
+    const stock = Number(p.stock) || 0;
     return acc + (Math.max(0, stock) * (Number(p.cost) || 0));
   }, 0);
 
@@ -253,15 +270,20 @@ export default function InventoryView({ products, add, update, remove, suppliers
     const product = {
       name: formData.get("name") as string,
       sku: formData.get("sku") as string,
+      barcode: formData.get("barcode") as string || "",
+      brand: formData.get("brand") as string || "",
+      company: formData.get("company") as string || "",
       price: Number(formData.get("price")),
       cost: Number(formData.get("cost")),
       stock: Number(formData.get("stock")),
       cartoonSize: Number(formData.get("cartoonSize") || 1),
+      cartonMarginSubDB: Number(formData.get("cartonMarginSubDB") || 0),
       supplierId: formData.get("supplierId") as string,
       unit: formData.get("unit") as string,
       category: formData.get("category") as string,
       expiryDate: formData.get("expiryDate") as string,
-      minStockLevel: Number(formData.get("minStockLevel") || 5)
+      minStockLevel: Number(formData.get("minStockLevel") || 5),
+      status: formData.get("status") as string || "Active"
     };
     
     if (editingId) {
@@ -272,6 +294,19 @@ export default function InventoryView({ products, add, update, remove, suppliers
       await update(editingId, product);
 
       if (prevStock !== nextStock) {
+        if (stockAdjustments && stockAdjustments.add) {
+          await stockAdjustments.add({
+            productId: editingId,
+            productName: product.name || "N/A",
+            sku: product.sku || "N/A",
+            previousStock: prevStock,
+            newStock: nextStock,
+            quantityChanged: nextStock - prevStock,
+            reason: "পণ্যের বিবরণী পরিবর্তন (Product Details Edited)",
+            date: new Date().toISOString(),
+            user: user?.email || "Unknown"
+          });
+        }
         await recordStockMovement(origProduct.id, 'ADJUSTMENT', nextStock - prevStock, editingId);
       }
       setEditingId(null);
@@ -279,16 +314,35 @@ export default function InventoryView({ products, add, update, remove, suppliers
       const newId = await add({
           name: product.name,
           sku: product.sku,
+          barcode: product.barcode,
+          brand: product.brand,
+          company: product.company,
           price: product.price,
           cost: product.cost,
+          stock: product.stock,
           cartoonSize: product.cartoonSize,
+          cartonMarginSubDB: product.cartonMarginSubDB,
           supplierId: product.supplierId,
           unit: product.unit,
           category: product.category,
           expiryDate: product.expiryDate,
-          minStockLevel: product.minStockLevel
+          minStockLevel: product.minStockLevel,
+          status: product.status
       });
       if (newId && product.stock > 0) {
+        if (stockAdjustments && stockAdjustments.add) {
+          await stockAdjustments.add({
+            productId: newId,
+            productName: product.name || "N/A",
+            sku: product.sku || "N/A",
+            previousStock: 0,
+            newStock: product.stock,
+            quantityChanged: product.stock,
+            reason: "নতুন পণ্য প্রারম্ভিক মজুদ (New Product Opening Stock)",
+            date: new Date().toISOString(),
+            user: user?.email || "Unknown"
+          });
+        }
         await recordStockMovement(newId, 'OPENING', product.stock, newId);
       }
     }
@@ -417,8 +471,8 @@ export default function InventoryView({ products, add, update, remove, suppliers
          const sku = (itemData.SKU || itemData.sku || "").trim();
          const category = (itemData.Category || itemData.category || "General").trim();
          const stock = Number(itemData.Stock || itemData.stock || 0);
-         const price = Number(itemData.Price || itemData.price || 0);
-         const cost = Number(itemData.Cost || itemData.cost || 0);
+         const price = Number(itemData["SALE PRICE"] || itemData["Sale Price"] || itemData["sale price"] || itemData["salePrice"] || itemData.Price || itemData.price || 0);
+         const cost = Number(itemData["PURCHASE COST"] || itemData["Purchase Cost"] || itemData["purchase cost"] || itemData["PURCHASE PRICE"] || itemData["Purchase Price"] || itemData["purchase price"] || itemData["purchasePrice"] || itemData.Cost || itemData.cost || 0);
          const cartoonSize = Number(itemData.CartonSize || itemData.cartoonSize || 1);
          const unit = (itemData.Unit || itemData.unit || "Pcs").trim();
          const tempSupplier = (itemData.SupplierName || itemData.supplierName || "").trim();
@@ -453,7 +507,12 @@ export default function InventoryView({ products, add, update, remove, suppliers
              await update(existing.id, { ...existing, ...productData });
          } else {
              const newId = await add(productData);
-             if (newId) newIds.push(newId);
+             if (newId) {
+                 newIds.push(newId);
+                 if (productData.stock > 0) {
+                    await recordStockMovement(newId, 'OPENING', productData.stock, newId);
+                 }
+             }
          }
          count++;
       }
@@ -623,8 +682,22 @@ export default function InventoryView({ products, add, update, remove, suppliers
               return (
               <tr key={p.id} className={isExpired ? "bg-red-50 hover:bg-red-100" : isNearingExpiry ? "bg-orange-50 hover:bg-orange-100" : "hover:bg-[#FDFDFD]"}>
                 <td className="px-6 py-4">
-                  <div className="font-medium text-[#1A1A1A]">{p.name}</div>
-                  <div className="text-xs text-[#ADB5BD] font-mono">{p.sku || "No SKU"}</div>
+                  <div className="font-bold text-gray-900 flex items-center gap-2">
+                    {p.name}
+                    {p.status === "Inactive" && (
+                      <span className="px-1.5 py-0.5 text-[10px] bg-red-100 text-red-700 font-bold rounded">নিষ্ক্রিয় (Inactive)</span>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-2 mt-1 text-xs text-gray-600 font-sans">
+                    <span className="bg-gray-100 px-1 py-0.5 rounded font-mono">SKU: {p.sku || "N/A"}</span>
+                    {p.barcode && <span className="bg-gray-100 px-1.5 py-0.5 rounded font-mono">📟 {p.barcode}</span>}
+                    {p.brand && <span className="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded font-medium">🏷️ {p.brand}</span>}
+                    {p.company && <span className="bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded font-medium">🏢 {p.company}</span>}
+                    {p.cartoonSize && <span className="bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded font-medium">📦 কার্টুন সাইজ: {p.cartoonSize} {p.unit || "pcs"}</span>}
+                    {p.cartonMarginSubDB !== undefined && p.cartonMarginSubDB > 0 && (
+                      <span className="bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded font-bold">💰 SubDB Margin: ৳{p.cartonMarginSubDB}</span>
+                    )}
+                  </div>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
                   <span className="px-2 py-1 bg-[#E9ECEF] rounded text-xs font-medium uppercase">{p.category || "General"}</span>
@@ -655,14 +728,14 @@ export default function InventoryView({ products, add, update, remove, suppliers
                       onDoubleClick={() => {
                         if (role === "sr") return;
                         setInlineEditId(p.id);
-                        setInlineStock(calculateStock(movements, p.id));
+                        setInlineStock(p.stock !== undefined ? p.stock : 0);
                         setInlinePrice(p.price);
                         setInlineCost(p.cost || 0);
                       }}
-                      className={`${calculateStock(movements, p.id) <= (p.minStockLevel || 5) ? "text-red-500 font-bold" : ""} ${role === "sr" ? "" : "cursor-pointer border-b border-dashed border-gray-300 hover:border-black"} select-none inline-block`}
+                      className={`${(p.stock !== undefined ? p.stock : 0) <= (p.minStockLevel || 5) ? "text-red-500 font-bold" : ""} ${role === "sr" ? "" : "cursor-pointer border-b border-dashed border-gray-300 hover:border-black"} select-none inline-block`}
                       title={role === "sr" ? "" : "ডাবল ক্লিক করে ইনলাইন এডিট করুন"}
                     >
-                      {calculateStock(movements, p.id)} {p.unit || "pcs"}
+                      {p.stock !== undefined ? p.stock : 0} {p.unit || "pcs"}
                     </div>
                   )}
                 </td>
@@ -800,17 +873,9 @@ export default function InventoryView({ products, add, update, remove, suppliers
                               setInlinePrice(p.price);
                               setInlineCost(p.cost || 0);
                             }}
-                            className="p-2 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg"
                             title="ইনলাইন এডিট করুন"
                           >
                             <Edit2 className="w-4 h-4" />
-                          </button>
-                          <button 
-                            onClick={() => { if(confirm("ডিলিট করতে চান?")) remove(p.id); }}
-                            className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
-                            title="ডিলিট"
-                          >
-                            <Trash2 className="w-4 h-4" />
                           </button>
                         </>
                       )}
@@ -818,93 +883,144 @@ export default function InventoryView({ products, add, update, remove, suppliers
                   )}
                 </td>
               </tr>
-              );
-            })}
+            )})}
           </tbody>
         </table>
-        {filtered.length === 0 && (
-          <div className="py-20 text-center text-[#ADB5BD]"> কোনো পণ্য পাওয়া যায়নি </div>
-        )}
       </div>
 
-      {showBulk && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white max-w-2xl w-full rounded-2xl p-6 shadow-2xl">
-            <h3 className="text-xl font-bold mb-2">পণ্য বাল্ক এন্ট্রি</h3>
-            <div className="text-xs text-gray-500 mb-4 space-y-1">
-              <p>আপনার CSV ফাইলটি আপলোড করুন।</p>
-              <button onClick={downloadCSV} className="text-indigo-600 font-bold underline cursor-pointer">স্যাম্পল CSV ফরম্যাট ডাউনলোড করুন</button>
-            </div>
-            <CSVUploader onImport={handleImportInventory} title="পণ্যসমূহ" />
-            <div className="flex gap-4 mt-4">
-              <button onClick={() => setShowBulk(false)} className="flex-1 border py-3 rounded-xl font-medium">বন্ধ করুন</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {showAdd && (() => {
+        const editingProduct = products.find(x => x.id === editingId);
+        return (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+            <div className="bg-white max-w-2xl w-full rounded-2xl p-6 shadow-2xl overflow-y-auto max-h-[90vh]">
+              <div className="border-b pb-3 mb-4 flex justify-between items-center">
+                <h3 className="text-xl font-bold text-gray-900">
+                  {editingId ? "✏️ পণ্য এডিট করুন" : "➕ নতুন পণ্য যোগ করুন"}
+                </h3>
+                <button onClick={() => setShowAdd(false)} className="text-gray-400 hover:text-gray-600 font-bold text-2xl">&times;</button>
+              </div>
 
-      {showAdd && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white max-w-lg w-full rounded-2xl p-6 shadow-2xl">
-            <h3 className="text-xl font-bold mb-6">{editingId ? "পণ্য এডিট করুন" : "নতুন পণ্য যোগ করুন"}</h3>
-            <form onSubmit={handleAdd} className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="col-span-2">
-                  <label className="block text-sm font-medium mb-1">পণ্যের নাম</label>
-                  <input name="name" defaultValue={products.find(x => x.id === editingId)?.name} required className="w-full border rounded-lg p-2" />
-                </div>
+              <form onSubmit={handleAdd} className="space-y-6 text-gray-950">
+                {/* 1. বেসিক তথ্য */}
                 <div>
-                  <label className="block text-sm font-medium mb-1">SKU</label>
-                  <input name="sku" defaultValue={products.find(x => x.id === editingId)?.sku} className="w-full border rounded-lg p-2" />
+                  <h4 className="text-sm font-semibold text-blue-600 uppercase tracking-wider mb-3">১. বেসিক তথ্য (Basic Details)</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="md:col-span-3">
+                      <label className="block text-xs font-bold text-gray-700 mb-1">পণ্যের নাম *</label>
+                      <input name="name" defaultValue={editingProduct?.name} required placeholder="যেমন: Pran Mango Juice 250ml" className="w-full border rounded-xl p-2.5 text-sm bg-gray-50 focus:bg-white focus:ring-1 focus:ring-blue-500 outline-none transition" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 mb-1">বারকোড (Barcode)</label>
+                      <input name="barcode" defaultValue={editingProduct?.barcode} placeholder="বারকোড স্ক্যান বা লিখুন" className="w-full border rounded-xl p-2.5 text-sm bg-gray-50 focus:bg-white focus:ring-1 focus:ring-blue-500 outline-none transition" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 mb-1">SKU (Stock Keeping Unit)</label>
+                      <input name="sku" defaultValue={editingProduct?.sku} placeholder="যেমন: PRN-MJ-250" className="w-full border rounded-xl p-2.5 text-sm bg-gray-50 focus:bg-white focus:ring-1 focus:ring-blue-500 outline-none transition" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 mb-1">অবস্থা (Status)</label>
+                      <select name="status" defaultValue={editingProduct?.status || "Active"} className="w-full border rounded-xl p-2.5 text-sm bg-white focus:ring-1 focus:ring-blue-500 outline-none transition">
+                        <option value="Active">সক্রিয় (Active)</option>
+                        <option value="Inactive">নিষ্ক্রিয় (Inactive)</option>
+                      </select>
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1">সাপ্লায়ার / কোম্পানি</label>
-                  <select name="supplierId" defaultValue={products.find(x => x.id === editingId)?.supplierId} className="w-full border rounded-lg p-2 bg-white">
-                    <option value="">সিলেক্ট করুন</option>
-                    {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
+
+                {/* 2. ক্যাটাগরি ও ব্র্যান্ড */}
+                <div className="border-t pt-4">
+                  <h4 className="text-sm font-semibold text-blue-600 uppercase tracking-wider mb-3">২. ক্যাটাগরি ও ব্র্যান্ড (Category & Origin)</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 mb-1">ক্যাটাগরি</label>
+                      <input name="category" defaultValue={editingProduct?.category} placeholder="যেমন: Beverage, Cosmetics, Groceries" className="w-full border rounded-xl p-2.5 text-sm bg-gray-50 focus:bg-white focus:ring-1 focus:ring-blue-500 outline-none transition" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 mb-1">ব্র্যান্ড (Brand)</label>
+                      <input name="brand" defaultValue={editingProduct?.brand} placeholder="যেমন: Pran, ACI, Unilever" className="w-full border rounded-xl p-2.5 text-sm bg-gray-50 focus:bg-white focus:ring-1 focus:ring-blue-500 outline-none transition" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 mb-1">সাপ্লায়ার (Supplier)</label>
+                      <select 
+                        name="supplierId" 
+                        defaultValue={editingProduct?.supplierId} 
+                        onChange={(e) => {
+                          // Try to automatically populate the company field if selected supplier has one
+                          const selectedSupp = suppliers.find(s => s.id === e.target.value);
+                          if (selectedSupp && selectedSupp.company) {
+                            const companyInput = document.getElementById("prod_company_input") as HTMLInputElement;
+                            if (companyInput) companyInput.value = selectedSupp.company;
+                          }
+                        }}
+                        className="w-full border rounded-xl p-2.5 text-sm bg-white focus:ring-1 focus:ring-blue-500 outline-none transition"
+                      >
+                        <option value="">সিলেক্ট করুন</option>
+                        {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 mb-1">কোম্পানি (Company Name)</label>
+                      <input id="prod_company_input" name="company" defaultValue={editingProduct?.company} placeholder="যেমন: Pran-RFL Group" className="w-full border rounded-xl p-2.5 text-sm bg-gray-50 focus:bg-white focus:ring-1 focus:ring-blue-500 outline-none transition" />
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1">ক্যাটাগরি</label>
-                  <input name="category" defaultValue={products.find(x => x.id === editingId)?.category} className="w-full border rounded-lg p-2" />
+
+                {/* 3. মূল্য ও কার্টুন মার্জিন */}
+                <div className="border-t pt-4">
+                  <h4 className="text-sm font-semibold text-blue-600 uppercase tracking-wider mb-3">৩. মূল্য ও মার্জিন (Pricing & Margins)</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 mb-1">কেনা দাম *</label>
+                      <input type="number" step="any" name="cost" defaultValue={editingProduct?.cost} required placeholder="0.00" className="w-full border rounded-xl p-2.5 text-sm bg-gray-50 focus:bg-white focus:ring-1 focus:ring-blue-500 outline-none transition" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 mb-1">বিক্রয় মূল্য *</label>
+                      <input type="number" step="any" name="price" defaultValue={editingProduct?.price} required placeholder="0.00" className="w-full border rounded-xl p-2.5 text-sm bg-gray-50 focus:bg-white focus:ring-1 focus:ring-blue-500 outline-none transition" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 mb-1">কার্টুন সাইজ *</label>
+                      <input type="number" step="any" name="cartoonSize" defaultValue={editingProduct?.cartoonSize || 1} required placeholder="যেমন: ২৪ বা ১২ পিস" className="w-full border rounded-xl p-2.5 text-sm bg-gray-50 focus:bg-white focus:ring-1 focus:ring-blue-500 outline-none transition" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 mb-1">কার্টুন মার্জিন (SubDB) *</label>
+                      <input type="number" step="any" name="cartonMarginSubDB" defaultValue={editingProduct?.cartonMarginSubDB || 0} placeholder="সাবডিবি মার্জিন" className="w-full border rounded-xl p-2.5 text-sm bg-gray-50 focus:bg-white focus:ring-1 focus:ring-blue-500 outline-none transition" />
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1">পণ্য কেনা দাম</label>
-                  <input type="number" step="any" name="cost" defaultValue={products.find(x => x.id === editingId)?.cost} className="w-full border rounded-lg p-2" />
+
+                {/* 4. স্টক ও পরিমাপ */}
+                <div className="border-t pt-4">
+                  <h4 className="text-sm font-semibold text-blue-600 uppercase tracking-wider mb-3">৪. স্টক ও পরিমাপ (Stock & Alerts)</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 mb-1">বর্তমান স্টক *</label>
+                      <input type="number" step="any" name="stock" defaultValue={editingProduct?.stock || 0} required placeholder="0" className="w-full border rounded-xl p-2.5 text-sm bg-gray-50 focus:bg-white focus:ring-1 focus:ring-blue-500 outline-none transition" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 mb-1">পরিমাপ একক (Unit)</label>
+                      <input name="unit" defaultValue={editingProduct?.unit} placeholder="যেমন: Pcs, Box, Pack" className="w-full border rounded-xl p-2.5 text-sm bg-gray-50 focus:bg-white focus:ring-1 focus:ring-blue-500 outline-none transition" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 mb-1">ন্যূনতম স্টক লেভেল *</label>
+                      <input type="number" step="any" name="minStockLevel" defaultValue={editingProduct?.minStockLevel || 5} required placeholder="5" className="w-full border rounded-xl p-2.5 text-sm bg-gray-50 focus:bg-white focus:ring-1 focus:ring-blue-500 outline-none transition" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 mb-1">মেয়াদউত্তীর্ণ তারিখ</label>
+                      <input type="date" name="expiryDate" defaultValue={editingProduct?.expiryDate} className="w-full border rounded-xl p-2.5 text-sm bg-gray-50 focus:bg-white focus:ring-1 focus:ring-blue-500 outline-none transition" />
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1">কার্টুন সাইজ (এক কার্টুনে পিস)</label>
-                  <input type="number" step="any" name="cartoonSize" defaultValue={products.find(x => x.id === editingId)?.cartoonSize || 1} required className="w-full border rounded-lg p-2" />
+
+                {/* সাবমিট ও বাতিল বোতাম */}
+                <div className="flex gap-4 pt-4 border-t">
+                  <button type="button" onClick={() => setShowAdd(false)} className="flex-1 border py-3 rounded-xl font-bold text-sm bg-gray-50 hover:bg-gray-100 transition">বাতিল</button>
+                  <button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm py-3 rounded-xl transition">সংরক্ষণ করুন</button>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1">বিক্রয় মূল্য</label>
-                  <input type="number" step="any" name="price" defaultValue={products.find(x => x.id === editingId)?.price} required className="w-full border rounded-lg p-2" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1">বর্তমান স্টক</label>
-                  <input type="number" step="any" name="stock" defaultValue={products.find(x => x.id === editingId)?.stock} required className="w-full border rounded-lg p-2" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1">মেয়াদউত্তীর্ণ তারিখ</label>
-                  <input type="date" name="expiryDate" defaultValue={products.find(x => x.id === editingId)?.expiryDate} className="w-full border rounded-lg p-2" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1">একক (Unit)</label>
-                  <input name="unit" placeholder="Kg, Pcs, Box" defaultValue={products.find(x => x.id === editingId)?.unit} className="w-full border rounded-lg p-2" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1">ন্যূনতম স্টক লেভেল (অ্যালার্টের জন্য)</label>
-                  <input type="number" step="any" name="minStockLevel" defaultValue={products.find(x => x.id === editingId)?.minStockLevel || 5} required className="w-full border rounded-lg p-2" />
-                </div>
-              </div>
-              <div className="flex gap-4 pt-4">
-                <button type="button" onClick={() => setShowAdd(false)} className="flex-1 border py-3 rounded-xl font-medium">বাতিল</button>
-                <button type="submit" className="flex-1 btn-primary py-3">সংরক্ষণ করুন</button>
-              </div>
-            </form>
+              </form>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {selectedProductForHistory && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
@@ -1028,6 +1144,20 @@ export default function InventoryView({ products, add, update, remove, suppliers
                 await update(adjustProduct.id, {
                   stock: newStock
                 });
+
+                if (stockAdjustments && stockAdjustments.add) {
+                  await stockAdjustments.add({
+                    productId: adjustProduct.id,
+                    productName: adjustProduct.name || "N/A",
+                    sku: adjustProduct.sku || "N/A",
+                    previousStock,
+                    newStock,
+                    quantityChanged: newStock - previousStock,
+                    reason: finalReason,
+                    date: new Date().toISOString(),
+                    user: user?.email || "Unknown"
+                  });
+                }
 
                 await recordStockMovement(adjustProduct.id, 'ADJUSTMENT', newStock - previousStock, adjustProduct.id);
                 toast.success("স্টক সমন্বয় সফলভাবে সম্পন্ন হয়েছে!");

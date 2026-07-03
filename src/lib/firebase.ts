@@ -4,8 +4,6 @@ import {
   initializeFirestore, 
   persistentLocalCache, 
   persistentMultipleTabManager,
-  doc, 
-  getDocFromServer,
   setLogLevel
 } from 'firebase/firestore';
 import 'firebase/firestore';
@@ -21,23 +19,8 @@ const app = initializeApp(firebaseConfig);
 export const db = initializeFirestore(app, {
   localCache: persistentLocalCache({
     tabManager: persistentMultipleTabManager()
-  }),
-  experimentalForceLongPolling: true
+  })
 }, firebaseConfig.firestoreDatabaseId);
-
-// CRITICAL CONSTRAINT: Test connection on boot
-async function testConnection() {
-  try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
-  } catch (error) {
-    if(error instanceof Error && error.message.includes('the client is offline')) {
-      console.error("Please check your Firebase configuration.");
-    } else {
-      console.error("Firebase connection test failed:", error);
-    }
-  }
-}
-testConnection();
 
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();

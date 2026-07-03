@@ -7,6 +7,7 @@ import { db } from "../lib/firebase";
 import { collection, getDocs, writeBatch, doc, addDoc, deleteDoc, updateDoc } from "firebase/firestore";
 import toast from "react-hot-toast";
 import { useCompany } from "../context/CompanyContext";
+import { useConfirm } from "../context/ConfirmContext";
 
 type ResetOption = {
   id: string;
@@ -53,6 +54,7 @@ export default function SettingsView({
 
   // --- COMPANY SETTINGS STATE & LOGIC ---
   const { companyId, company } = useCompany();
+  const { confirmDelete } = useConfirm();
 
   const [companyLogo, setCompanyLogo] = useState("");
   const [invoiceLogo, setInvoiceLogo] = useState("");
@@ -940,10 +942,13 @@ export default function SettingsView({
                         type="button"
                         onClick={() => {
                           console.log("Delete button clicked for group:", g.id);
-                          if (window.confirm(`আপনি কি নিশ্চিতভাবে "${g.name}" গ্রুপটি মুছে ফেলতে চান?`)) {
-                            console.log("Confirmed deletion for:", g.id);
-                            customerGroups.remove(g.id);
-                          }
+                          confirmDelete({
+                            recordName: g.name,
+                            onConfirm: async () => {
+                              console.log("Confirmed deletion for:", g.id);
+                              await customerGroups.remove(g.id);
+                            }
+                          });
                         }}
                         className="p-1.5 hover:bg-red-50 border border-gray-200 hover:border-red-150 rounded-lg text-gray-500 hover:text-red-650 transition-all cursor-pointer"
                         title="ডিলিট করুন"
@@ -1089,13 +1094,16 @@ export default function SettingsView({
 
           <div>
             <button
-              onClick={async () => {
-                if (window.confirm("আপনি কি নিশ্চিতভাবে অ্যাপের ক্যাশ ও লোকাল স্টোরেজ রিফ্রেশ করতে চান? এটি লোকাল ক্যাশ মুছে পেজটিকে রিলোড করবে।")) {
-                  // Temporarily remove versioning keys from localStorage so the cleanup is forced to run
-                  localStorage.removeItem("app_version");
-                  localStorage.removeItem("app_build_timestamp");
-                  await performAppStorageCleanup();
-                }
+              onClick={() => {
+                confirmDelete({
+                  recordName: "লোকাল ক্যাশ ও স্টোরেজ",
+                  onConfirm: async () => {
+                    // Temporarily remove versioning keys from localStorage so the cleanup is forced to run
+                    localStorage.removeItem("app_version");
+                    localStorage.removeItem("app_build_timestamp");
+                    await performAppStorageCleanup();
+                  }
+                });
               }}
               className="w-full bg-red-650 hover:bg-red-700 text-white px-4 py-3 rounded-xl flex items-center justify-center gap-2 text-xs font-black transition-all cursor-pointer shadow-xs active:scale-98"
             >

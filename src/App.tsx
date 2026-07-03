@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { onAuthStateChanged, signOut, User } from "firebase/auth";
 import { auth, db } from "./lib/firebase";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
@@ -12,6 +12,7 @@ import { Menu, X, LayoutDashboard, Package, FileText, ShoppingCart, Users, Truck
 import { snapshotAll } from "./lib/snapshot";
 import { useLanguage } from "./context/LanguageContext";
 import { performAppStorageCleanup } from "./lib/cleanup";
+import { calculateLedger } from "./utils/ledgerCalculator";
 
 
 import Sidebar from "./components/Sidebar";
@@ -219,6 +220,204 @@ export default function App() {
   const loans = useCollection<any>("loans");
   const returns = useCollection<any>("returns");
   const activityLogs = useCollection<any>("activity_logs");
+  const transactions = useCollection<any>("transactions");
+
+  // Dynamically calculate non-drifted customer/supplier balances on the fly
+  const enrichedCustomers = useMemo(() => {
+    if (customers.loading || transactions.loading) return customers.data || [];
+    return (customers.data || []).map(c => {
+      const { totalDue } = calculateLedger(
+        c.id,
+        "customer",
+        transactions.data || [],
+        suppliers.data || [],
+        products.data || [],
+        0
+      );
+      return {
+        ...c,
+        balance: totalDue
+      };
+    });
+  }, [customers.data, customers.loading, transactions.data, transactions.loading, suppliers.data, products.data]);
+
+  const enrichedSuppliers = useMemo(() => {
+    if (suppliers.loading || transactions.loading) return suppliers.data || [];
+    return (suppliers.data || []).map(s => {
+      const { totalDue } = calculateLedger(
+        s.id,
+        "supplier",
+        transactions.data || [],
+        suppliers.data || [],
+        products.data || [],
+        0
+      );
+      return {
+        ...s,
+        balance: totalDue
+      };
+    });
+  }, [suppliers.data, suppliers.loading, transactions.data, transactions.loading, products.data]);
+
+  // Wrapped transaction helper methods to ensure real-time consistency
+  const addPaymentWithTx = async (payRecord: any) => {
+    const payId = await payments.add(payRecord);
+    if (payId) {
+      const isCust = customers.data.some((c: any) => c.id === payRecord.entityId);
+      const isSupp = suppliers.data.some((s: any) => s.id === payRecord.entityId);
+      let partyType: "customer" | "supplier" | "staff" = "customer";
+      if (isSupp) partyType = "supplier";
+      else if (isCust) partyType = "customer";
+      else partyType = "staff";
+
+      await transactions.add({
+        id: payId,
+        partyId: payRecord.entityId,
+        partyType,
+        type: payRecord.type === "in" ? "payment_in" : "payment_out",
+        amount: Number(payRecord.amount || 0),
+        supplierId: payRecord.supplierId || "all",
+        date: payRecord.date || new Date().toISOString().split("T")[0],
+        description: payRecord.description || (payRecord.type === "in" ? "টাকা গ্রহণ" : "টাকা পরিশোধ"),
+        refId: payId,
+        method: payRecord.method,
+        accountId: payRecord.accountId,
+        createdAt: new Date().toISOString()
+      });
+    }
+    return payId;
+  };
+
+  const removePaymentWithTx = async (payId: string) => {
+    await payments.remove(payId);
+    await transactions.remove(payId);
+  };
+
+  const addSaleWithTx = async (saleRecord: any) => {
+    const saleId = await sales.add(saleRecord);
+    if (saleId) {
+      const supplierTotals: Record<string, number> = {};
+      (saleRecord.items || []).forEach((item: any) => {
+        const p = products.data.find((prod: any) => prod.id === (item.productId || item.id));
+        const sId = p?.supplierId || "all";
+        const val = Number(item.total || (Number(item.qty || item.quantity || 0) * Number(item.price || 0)) || 0);
+        supplierTotals[sId] = (supplierTotals[sId] || 0) + val;
+      });
+
+      const saleTotal = Number(saleRecord.total || saleRecord.totalAmount || 0);
+      const calculatedTotal = Object.values(supplierTotals).reduce((a, b) => a + b, 0);
+
+      if (calculatedTotal > 0 && Object.keys(supplierTotals).length > 0) {
+        for (const [sId, val] of Object.entries(supplierTotals)) {
+          const share = val / calculatedTotal;
+          const txAmount = saleTotal * share;
+          const txId = `${saleId}_${sId}`;
+
+          await transactions.add({
+            id: txId,
+            partyId: saleRecord.customerId,
+            partyType: "customer",
+            type: "sale",
+            amount: txAmount,
+            supplierId: sId,
+            date: saleRecord.date ? saleRecord.date.split("T")[0] : new Date().toISOString().split("T")[0],
+            description: `পণ্য বিক্রয় (POS/রুট বিল #${saleId.slice(-4).toUpperCase()})`,
+            refId: saleId,
+            createdAt: new Date().toISOString()
+          });
+        }
+      } else {
+        await transactions.add({
+          id: saleId,
+          partyId: saleRecord.customerId,
+          partyType: "customer",
+          type: "sale",
+          amount: saleTotal,
+          supplierId: "all",
+          date: saleRecord.date ? saleRecord.date.split("T")[0] : new Date().toISOString().split("T")[0],
+          description: `পণ্য বিক্রয় (POS/রুট)`,
+          refId: saleId,
+          createdAt: new Date().toISOString()
+        });
+      }
+    }
+    return saleId;
+  };
+
+  const addReturnWithTx = async (retRecord: any) => {
+    const retId = await returns.add(retRecord);
+    if (retId) {
+      const p = products.data.find((prod: any) => prod.id === retRecord.productId);
+      const sId = p?.supplierId || "all";
+
+      await transactions.add({
+        id: retId,
+        partyId: retRecord.customerId,
+        partyType: "customer",
+        type: "return",
+        amount: Number(retRecord.amount || 0),
+        supplierId: sId,
+        date: retRecord.date || new Date().toISOString().split("T")[0],
+        description: `পণ্য ফেরত সমন্বয় (পণ্য: ${p?.name || "N/A"})`,
+        refId: retId,
+        createdAt: new Date().toISOString()
+      });
+    }
+    return retId;
+  };
+
+  // Assign the overrides to prevent drift and integrate transactions
+  customers.data = enrichedCustomers;
+  suppliers.data = enrichedSuppliers;
+  payments.add = addPaymentWithTx;
+  payments.remove = removePaymentWithTx;
+  sales.add = addSaleWithTx;
+  returns.add = addReturnWithTx;
+
+  // Background self-healing sync
+  useEffect(() => {
+    const isDemoMode = localStorage.getItem("demo_user_session") !== null;
+    if (
+      !loading &&
+      !sales.loading &&
+      !payments.loading &&
+      !returns.loading &&
+      !purchases.loading &&
+      !customers.loading &&
+      !suppliers.loading &&
+      !products.loading &&
+      !transactions.loading
+    ) {
+      import("./utils/ledgerCalculator").then(({ syncExistingToTransactions }) => {
+        syncExistingToTransactions(
+          sales.data || [],
+          payments.data || [],
+          returns.data || [],
+          purchases.data || [],
+          customers.data || [],
+          suppliers.data || [],
+          products.data || [],
+          transactions.data || [],
+          isDemoMode
+        );
+      });
+    }
+  }, [
+    loading,
+    sales.loading,
+    payments.loading,
+    returns.loading,
+    purchases.loading,
+    customers.loading,
+    suppliers.loading,
+    products.loading,
+    transactions.loading,
+    sales.data,
+    payments.data,
+    returns.data,
+    purchases.data,
+    transactions.data
+  ]);
 
   const logAdminActivity = async (actionType: string, details: string) => {
     try {
@@ -614,6 +813,7 @@ export default function App() {
             payments={payments.data}
             sales={sales.data}
             activityLogs={activityLogs.data}
+            subDbs={subDbs.data}
             setActiveView={setActiveView} 
             role={role}
             allowedViews={role === 'admin' ? (RolePermissions as any).admin.allowedViews : (roleData?.allowedViews || (RolePermissions as any)[role]?.allowedViews || [])}
@@ -943,6 +1143,7 @@ export default function App() {
             summaries={summaries.data}
             products={products.data}
             sales={sales.data}
+            transactions={transactions.data}
             addCustomer={customers.add}
             updateCustomer={customers.update}
             addSupplier={suppliers.add}
@@ -1054,6 +1255,7 @@ export default function App() {
             payments={payments.data}
             sales={sales.data}
             activityLogs={activityLogs.data}
+            subDbs={subDbs.data}
             setActiveView={setActiveView} 
             role={role}
             allowedViews={role === 'admin' ? (RolePermissions as any).admin.allowedViews : (roleData?.allowedViews || (RolePermissions as any)[role]?.allowedViews || [])}

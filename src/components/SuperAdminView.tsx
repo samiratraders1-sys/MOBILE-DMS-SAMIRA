@@ -10,12 +10,14 @@ import {
 import { migrateToSamiraTraders } from '../lib/migration';
 import { addDoc, collection, doc, setDoc, deleteDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { useConfirm } from '../context/ConfirmContext';
 
 export default function SuperAdminView() {
   const companies = useCollection<Company>('companies');
   const licenses = useCollection<any>('licenses');
   const subscriptions = useCollection<any>('subscriptions');
   const { companyId, setCompanyId } = useCompany();
+  const { confirmDelete } = useConfirm();
 
   const [activeTab, setActiveTab] = useState<'companies' | 'licenses' | 'subscriptions' | 'system'>('companies');
   
@@ -162,13 +164,20 @@ export default function SuperAdminView() {
   };
 
   const handleDeleteCompany = async (compId: string) => {
-    if (!window.confirm('আপনি কি নিশ্চিত যে এই কোম্পানিটি ডিলিট করতে চান? সব ডাটা মুছে যাবে!')) return;
-    try {
-      await deleteDoc(doc(db, 'companies', compId));
-      toast.success('কোম্পানি সফলভাবে মুছে ফেলা হয়েছে!');
-    } catch (err: any) {
-      toast.error('কোম্পানি ডিলিট করতে সমস্যা: ' + err.message);
-    }
+    const comp = companies.data.find(c => c.id === compId);
+    const compName = comp ? comp.name : compId;
+    confirmDelete({
+      recordName: compName,
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'companies', compId));
+          toast.success('কোম্পানি সফলভাবে মুছে ফেলা হয়েছে!');
+        } catch (err: any) {
+          toast.error('কোম্পানি ডিলিট করতে সমস্যা: ' + err.message);
+          throw err;
+        }
+      }
+    });
   };
 
   const handleWipeAndInit = async () => {

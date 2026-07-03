@@ -3,6 +3,9 @@ import { Plus, ShoppingBasket, Search, Trash2, Printer, CheckCircle, RotateCcw, 
 import { recordStockMovement } from "../lib/inventoryEngine";
 import { MovementType } from "../lib/stockMovement";
 import { formatCurrency } from "../lib/utils";
+import { useFormAutoSave } from "../hooks/useFormAutoSave";
+import { useConfirm } from "../context/ConfirmContext";
+import toast from "react-hot-toast";
 
 interface POSProps {
   products: any[];
@@ -59,11 +62,33 @@ export default function PointOfSaleView({
   accounts = []
 }: POSProps) {
   const [cart, setCart] = useState<CartItem[]>([]);
+  const { confirmDelete } = useConfirm();
   const [productSearch, setProductSearch] = useState("");
   const [selectedCustomer, setSelectedCustomer] = useState("");
   const [customCashName, setCustomCashName] = useState("");
   const [selectedRoute, setSelectedRoute] = useState("");
   const [receivedAmount, setReceivedAmount] = useState("");
+
+  // Auto-save form values to IndexedDB
+  const formStateToSave = React.useMemo(() => ({
+    cart,
+    selectedCustomer,
+    customCashName,
+    selectedRoute,
+    receivedAmount
+  }), [cart, selectedCustomer, customCashName, selectedRoute, receivedAmount]);
+
+  const { saveStatus, clearState } = useFormAutoSave(
+    "pos-form",
+    formStateToSave,
+    (saved) => {
+      if (saved.cart !== undefined) setCart(saved.cart);
+      if (saved.selectedCustomer !== undefined) setSelectedCustomer(saved.selectedCustomer);
+      if (saved.customCashName !== undefined) setCustomCashName(saved.customCashName);
+      if (saved.selectedRoute !== undefined) setSelectedRoute(saved.selectedRoute);
+      if (saved.receivedAmount !== undefined) setReceivedAmount(saved.receivedAmount);
+    }
+  );
   
   // Checkout & receipt states
   const [activeReceipt, setActiveReceipt] = useState<any | null>(null);
@@ -199,6 +224,7 @@ export default function PointOfSaleView({
     setCustomCashName("");
     setSelectedRoute("");
     setReceivedAmount("");
+    clearState();
   };
 
   // Compute calculated values per line and in total
@@ -251,6 +277,94 @@ export default function PointOfSaleView({
     if (cart.length === 0) return;
     if (isSubmitting || submittingRef.current) return;
 
+    const executeCheckout = async () => {
+      const customerName = selectedCustomerObj ? selectedCustomerObj.name : (customCashName || "নগদ কাস্টমার");
+      const checkoutDate = new Date().toISOString();
+
+      const saleRecord = {
+        date: checkoutDate,
+        customerId: selectedCustomer || "cash",
+        customerName,
+        routeId: selectedRoute || "N/A",
+        dsrId: "N/A",
+        items: totals.items.map(item => ({
+          productId: item.productId,
+          name: item.name,
+          cartons: item.cartons,
+          pieces: item.pieces,
+          freeQty: item.freeQty,
+          discount: item.discount,
+          rate: item.rate,
+          total: item.lineTotal,
+          qty: item.linePieces // compatible with regular items list
+        })),
+        total: totals.netTotal,
+        paidAmount: paymentToCollect,
+        dueAmount: dueAmount,
+        status: "paid",
+        approved: true,
+        createdBy: user?.email || "Staff"
+      };
+
+      submittingRef.current = true;
+      setIsSubmitting(true);
+      try {
+        // 1. Submit sale invoice
+        await add(saleRecord);
+
+        // 2. Deduct product inventory stock (demanded + free quantities)
+        if (updateProduct) {
+          for (const item of totals.items) {
+            const demandedAndFree = (Number(item.linePieces) || 0) + (Number(item.freeQty) || 0);
+            await recordStockMovement(item.productId, 'SALES', -demandedAndFree, "POS_SALE_" + Date.now());
+          }
+        }
+
+        // 3. Log received payments
+        if (addPayment && paymentToCollect > 0) {
+          await addPayment({
+            date: checkoutDate.split("T")[0],
+            type: "in",
+            amount: paymentToCollect,
+            category: "POS Sales",
+            description: `POS বিক্রয় সংগৃহীত পেমেন্ট (কাস্টমার: ${customerName})`,
+            entityId: selectedCustomer || "cash",
+            method: "Cash",
+            status: "approved",
+            approved: true,
+            accountId: defaultAccountId,
+            createdBy: user?.email || "Staff"
+          });
+        }
+
+        // 4. Update customer ledger outstanding balance (Dues) if credit customer
+        if (selectedCustomer && updateCustomer && selectedCustomerObj) {
+          await updateCustomer(selectedCustomer, {
+            balance: (selectedCustomerObj.balance || 0) + dueAmount
+          });
+        }
+
+        // 5. Open invoice printer modal
+        setActiveReceipt({
+          ...saleRecord,
+          invoiceId: `POS-${Math.floor(100000 + Math.random() * 900000)}`,
+          items: totals.items
+        });
+        setIsCheckoutModalOpen(true);
+        
+        // Clear current cart session
+        setCart([]);
+        setCustomCashName("");
+        setReceivedAmount("");
+        await clearState();
+      } catch (err: any) {
+        toast.error("বিক্রয় সম্পন্ন করার সময় সমস্যা ঘটেছে: " + err.message);
+      } finally {
+        submittingRef.current = false;
+        setIsSubmitting(false);
+      }
+    };
+
     // Check stock warning
     const stockIssues = totals.items.filter(item => {
       const demanded = item.linePieces + item.freeQty;
@@ -258,96 +372,15 @@ export default function PointOfSaleView({
     });
 
     if (stockIssues.length > 0) {
-      const confirmProceed = window.confirm(
-        `সতর্কতা: কিছু পণ্যের স্টক চাহিদার তুলনায় কম আছে। আপনি কি তাও বিক্রয় সম্পন্ন করতে চান?\n\n` +
-        stockIssues.map(i => `- ${i.name} (স্টক: ${i.stock} পিস, চাহিদা: ${i.linePieces + i.freeQty} পিস)`).join("\n")
-      );
-      if (!confirmProceed) return;
-    }
-
-    const customerName = selectedCustomerObj ? selectedCustomerObj.name : (customCashName || "নগদ কাস্টমার");
-    const checkoutDate = new Date().toISOString();
-
-    const saleRecord = {
-      date: checkoutDate,
-      customerId: selectedCustomer || "cash",
-      customerName,
-      routeId: selectedRoute || "N/A",
-      dsrId: "N/A",
-      items: totals.items.map(item => ({
-        productId: item.productId,
-        name: item.name,
-        cartons: item.cartons,
-        pieces: item.pieces,
-        freeQty: item.freeQty,
-        discount: item.discount,
-        rate: item.rate,
-        total: item.lineTotal,
-        qty: item.linePieces // compatible with regular items list
-      })),
-      total: totals.netTotal,
-      paidAmount: paymentToCollect,
-      dueAmount: dueAmount,
-      status: "paid",
-      approved: true,
-      createdBy: user?.email || "Staff"
-    };
-
-    submittingRef.current = true;
-    setIsSubmitting(true);
-    try {
-      // 1. Submit sale invoice
-      await add(saleRecord);
-
-      // 2. Deduct product inventory stock (demanded + free quantities)
-      if (updateProduct) {
-        for (const item of totals.items) {
-          const demandedAndFree = (Number(item.linePieces) || 0) + (Number(item.freeQty) || 0);
-          await recordStockMovement(item.productId, 'SALES', -demandedAndFree, "POS_SALE_" + Date.now());
-        }
-      }
-
-      // 3. Log received payments
-      if (addPayment && paymentToCollect > 0) {
-        await addPayment({
-          date: checkoutDate.split("T")[0],
-          type: "in",
-          amount: paymentToCollect,
-          category: "POS Sales",
-          description: `POS বিক্রয় সংগৃহীত পেমেন্ট (কাস্টমার: ${customerName})`,
-          entityId: selectedCustomer || "cash",
-          method: "Cash",
-          status: "approved",
-          approved: true,
-          accountId: defaultAccountId,
-          createdBy: user?.email || "Staff"
-        });
-      }
-
-      // 4. Update customer ledger outstanding balance (Dues) if credit customer
-      if (selectedCustomer && updateCustomer && selectedCustomerObj) {
-        await updateCustomer(selectedCustomer, {
-          balance: (selectedCustomerObj.balance || 0) + dueAmount
-        });
-      }
-
-      // 5. Open invoice printer modal
-      setActiveReceipt({
-        ...saleRecord,
-        invoiceId: `POS-${Math.floor(100000 + Math.random() * 900000)}`,
-        items: totals.items
+      confirmDelete({
+        title: "স্টক সতর্কতা নিশ্চিত করুন",
+        recordName: "কম স্টক থাকা পণ্যের বিক্রয়",
+        warning: `সতর্কতা: কিছু পণ্যের স্টক চাহিদার তুলনায় কম আছে। আপনি কি তাও বিক্রয় সম্পন্ন করতে চান?\n\n` +
+          stockIssues.map(i => `- ${i.name} (স্টক: ${i.stock} পিস, চাহিদা: ${i.linePieces + i.freeQty} পিস)`).join("\n"),
+        onConfirm: executeCheckout
       });
-      setIsCheckoutModalOpen(true);
-      
-      // Clear current cart session
-      setCart([]);
-      setCustomCashName("");
-      setReceivedAmount("");
-    } catch (err: any) {
-      alert("বিক্রয় সম্পন্ন করার সময় সমস্যা ঘটেছে: " + err.message);
-    } finally {
-      submittingRef.current = false;
-      setIsSubmitting(false);
+    } else {
+      await executeCheckout();
     }
   };
 
@@ -481,7 +514,27 @@ export default function PointOfSaleView({
     <div id="pos-root-container" className="space-y-6">
       <div className="flex justify-between items-center bg-white p-4 rounded-2xl border">
         <div>
-          <h2 className="text-2xl font-black text-gray-900">নতুন বিক্রয় (POS)</h2>
+          <h2 className="text-2xl font-black text-gray-900 flex items-center gap-2 flex-wrap">
+            নতুন বিক্রয় (POS)
+            {saveStatus === "saving" && (
+              <span className="text-xs font-normal text-amber-600 bg-amber-50 border border-amber-100 px-2 py-0.5 rounded-full flex items-center gap-1">
+                <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" />
+                অটো-সেভ হচ্ছে...
+              </span>
+            )}
+            {saveStatus === "saved" && (
+              <span className="text-xs font-normal text-emerald-600 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-full flex items-center gap-1">
+                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
+                অটো-সেভ সক্রিয়
+              </span>
+            )}
+            {saveStatus === "error" && (
+              <span className="text-xs font-normal text-rose-600 bg-rose-50 border border-rose-100 px-2 py-0.5 rounded-full flex items-center gap-1">
+                <span className="w-1.5 h-1.5 bg-rose-500 rounded-full" />
+                অটো-সেভ ত্রুটি
+              </span>
+            )}
+          </h2>
           <p className="text-sm text-gray-500 font-semibold mb-0">একসাথে ফ্রি প্রোডাক্ট ও ডিস্কাউন্ট এন্ট্রি এবং অটোমেটিক লেজার সমন্বয়</p>
         </div>
         <div className="flex items-center gap-3">

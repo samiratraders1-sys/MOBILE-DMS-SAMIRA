@@ -6,6 +6,7 @@ import CSVUploader from "./CSVUploader";
 import DataPreviewModal from "./DataPreviewModal";
 import toast from "react-hot-toast";
 import { getGroupColors } from "../lib/utils";
+import { useConfirm } from "../context/ConfirmContext";
 
 interface EntitiesViewProps {
   title: string;
@@ -49,6 +50,7 @@ export default function EntitiesView({
   orders = []
 }: EntitiesViewProps) {
   const [showAdd, setShowAdd] = useState(false);
+  const { confirmDelete } = useConfirm();
   const [showBulk, setShowBulk] = useState(false);
   const [bulkText, setBulkText] = useState("");
   const [search, setSearch] = useState("");
@@ -101,14 +103,6 @@ export default function EntitiesView({
   const [customItemRate, setCustomItemRate] = useState("");
   const [productSearchQuery, setProductSearchQuery] = useState("");
   const [showProductDropdown, setShowProductDropdown] = useState(false);
-
-  // Custom inline confirmation modal state
-  const [confirmModal, setConfirmModal] = useState<{
-    show: boolean;
-    title: string;
-    message: string;
-    onConfirm: () => void;
-  } | null>(null);
 
   // Sub-Navigation Tabs for Staff & Customer Management
   const [activeTab, setActiveTab] = useState<"directory" | "attendance" | "payroll" | "crm">("directory");
@@ -1023,18 +1017,16 @@ export default function EntitiesView({
                   )}
                   <button 
                     onClick={() => {
-                      setConfirmModal({
-                        show: true,
-                        title: `${getTypeName()} ডিলিট করুন`,
-                        message: `আপনি কি নিশ্চিতভাবে এই ${getTypeName().toLowerCase()}টি ডিলিট করতে চান? এটি হিসাব ও সংশ্লিষ্ট সকল রেকর্ডের উপর প্রভাব ফেলতে পারে এবং এই অ্যাকশনটি পূর্বাবস্থায় ফিরিয়ে আনা যাবে না।`,
+                      confirmDelete({
+                        recordName: item.name || item.id,
                         onConfirm: async () => {
-                          setConfirmModal(null);
                           try {
                             await remove(item.id);
                             toast.success(`${getTypeName()} সফলভাবে ডিলিট করা হয়েছে!`);
                           } catch (err: any) {
                             console.error(err);
                             toast.error("ডিলিট করতে সমস্যা হয়েছে: " + err.message);
+                            throw err;
                           }
                         }
                       });
@@ -2103,34 +2095,6 @@ export default function EntitiesView({
         </div>
       )}
 
-      {/* CUSTOM INLINE CONFIRMATION MODAL TO BYPASS IFRAME RESTRICTIONS */}
-      {confirmModal && confirmModal.show && (
-        <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 p-4 transition-all backdrop-blur-xs animate-fade-in">
-          <div className="bg-white rounded-3xl p-6 max-w-md w-full border border-gray-150 shadow-2xl space-y-4 animate-scale-up">
-            <h3 className="text-base font-black text-gray-950 flex items-center gap-2">
-              <span className="w-1.5 h-4.5 bg-indigo-600 rounded-xs" /> {confirmModal.title}
-            </h3>
-            <p className="text-xs font-semibold text-gray-650 leading-relaxed whitespace-pre-line">
-              {confirmModal.message}
-            </p>
-            <div className="flex gap-3 pt-2">
-              <button 
-                onClick={() => setConfirmModal(null)}
-                className="flex-1 py-3 px-4 bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold border border-gray-200 rounded-xl text-xs transition-all cursor-pointer"
-              >
-                বাতিল করুন
-              </button>
-              <button 
-                onClick={confirmModal.onConfirm}
-                className="flex-1 py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold rounded-xl text-xs transition-all cursor-pointer"
-              >
-                নিশ্চিত করুন
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* 💬 BULK WHATSAPP MESSAGE MODAL WITH DYNAMIC TEMPLATE RENDERING */}
       {showBulkMessageModal && (
         <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/65 p-4 backdrop-blur-xs animate-in fade-in duration-250">
@@ -2350,12 +2314,11 @@ export default function EntitiesView({
                 <button
                   type="button"
                   onClick={() => {
-                    setConfirmModal({
-                      show: true,
+                    confirmDelete({
                       title: "সম্পূর্ণ ডেটা রিসেট নিশ্চিতকরণ",
-                      message: "আপনি কি নিশ্চিতভাবে আপনার সকল সিলেক্টেড কাস্টমার কিউ এবং স্যান্ড স্ট্যাটাস রিসেট করতে চান?",
-                      onConfirm: () => {
-                        setConfirmModal(null);
+                      recordName: "বাল্ক কাস্টমার কিউ",
+                      warning: "আপনি কি নিশ্চিতভাবে আপনার সকল সিলেক্টেড কাস্টমার কিউ এবং স্যান্ড স্ট্যাটাস রিসেট করতে চান?",
+                      onConfirm: async () => {
                         setSelectedCustomersForBulk([]);
                         setBulkSentStatus({});
                         setShowBulkMessageModal(false);

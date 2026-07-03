@@ -4,6 +4,7 @@ import {
   XCircle, Filter, Download, User, ArrowDownAz, RefreshCw, AlertCircle
 } from "lucide-react";
 import toast from "react-hot-toast";
+import { useConfirm } from "../context/ConfirmContext";
 
 interface ActivityLogProps {
   logs: any[];
@@ -17,6 +18,7 @@ export default function ActivityLogView({ logs, onClearLogs, role, userEmail }: 
   const [selectedType, setSelectedType] = useState<"all" | "delete" | "approve" | "reject" | "inventory">("all");
   const [selectedUser, setSelectedUser] = useState<string>("all");
   const [clearing, setClearing] = useState(false);
+  const { confirmDelete } = useConfirm();
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
 
@@ -183,20 +185,23 @@ export default function ActivityLogView({ logs, onClearLogs, role, userEmail }: 
       return;
     }
 
-    const doubleCheck = window.confirm("আপনি কি নিশ্চিতভাবে সম্পূর্ণ অ্যাক্টিভিটি হিস্ট্রি ডিলিট করতে চান?\nএই রেকর্ড উদ্ধার করা সম্ভব নয়।");
-    if (!doubleCheck) return;
-
-    setClearing(true);
-    try {
-      if (onClearLogs) {
-        await onClearLogs();
-        toast.success("সমস্ত অ্যাক্টিভিটি লগ সফলভাবে মুছে ফেলা হয়েছে");
+    confirmDelete({
+      recordName: "সম্পূর্ণ অ্যাক্টিভিটি হিস্ট্রি",
+      onConfirm: async () => {
+        setClearing(true);
+        try {
+          if (onClearLogs) {
+            await onClearLogs();
+            toast.success("সমস্ত অ্যাক্টিভিটি লগ সফলভাবে মুছে ফেলা হয়েছে");
+          }
+        } catch (err: any) {
+          toast.error("লগ ক্লিয়ার করতে সমস্যা হয়েছে: " + err.message);
+          throw err;
+        } finally {
+          setClearing(false);
+        }
       }
-    } catch (err: any) {
-      toast.error("লগ ক্লিয়ার করতে সমস্যা হয়েছে: " + err.message);
-    } finally {
-      setClearing(false);
-    }
+    });
   };
 
   // Badge styles helper

@@ -24,6 +24,7 @@ import {
 import toast from "react-hot-toast";
 import { motion, AnimatePresence } from "motion/react";
 import CSVUploader from "./CSVUploader";
+import { useConfirm } from "../context/ConfirmContext";
 
 // Format currency in Bangladeshi Taka
 const formatCurrency = (val: number) => {
@@ -59,6 +60,7 @@ export default function PaymentHistoryView({
   user
 }: PaymentHistoryViewProps) {
   // Filter States
+  const { confirmDelete } = useConfirm();
   const [searchTerm, setSearchTerm] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -383,18 +385,22 @@ export default function PaymentHistoryView({
       return;
     }
 
-    if (window.confirm(`আপনি কি নিশ্চিতভাবে "${description || "পেমেন্ট রেকর্ড"}" মুছে ফেলতে চান? এটি হিসাবের ব্যালেন্সে প্রভাব ফেলবে!`)) {
-      try {
-        if (removePayment) {
-          await removePayment(id);
-          toast.success("লেনদেন বিবরণী সফলভাবে মুছে ফেলা হয়েছে!");
-        } else {
-          toast.error("পদ্ধতিটি কনফিগার করা নেই।");
+    confirmDelete({
+      recordName: description || "পেমেন্ট রেকর্ড",
+      onConfirm: async () => {
+        try {
+          if (removePayment) {
+            await removePayment(id);
+            toast.success("লেনদেন বিবরণী সফলভাবে মুছে ফেলা হয়েছে!");
+          } else {
+            toast.error("পদ্ধতিটি কনফিগার করা নেই।");
+          }
+        } catch (err: any) {
+          toast.error("মুছে ফেলা সম্ভব হয়নি: " + err.message);
+          throw err;
         }
-      } catch (err: any) {
-        toast.error("মুছে ফেলা সম্ভব হয়নি: " + err.message);
       }
-    }
+    });
   };
 
   return (

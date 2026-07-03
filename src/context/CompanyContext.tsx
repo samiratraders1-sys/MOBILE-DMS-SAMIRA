@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { doc, onSnapshot, collection, query, where, getDocs } from 'firebase/firestore';
+import { doc, onSnapshot, collection, query, where, getDocs, setDoc, getDoc } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 import { Company } from '../types';
 
@@ -89,24 +89,104 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
 
       let currentCompanyId = companyId;
+      let userDocData: any = null;
 
-      if (!currentCompanyId) {
-        // Try to fetch companyId for the user
-        try {
-          const q = query(collection(db, 'users'), where('email', '==', user.email));
+      try {
+        // 1. Try to get the user document by UID (fastest, most secure, compliant with rules)
+        const userDocRef = doc(db, 'users', user.uid);
+        const userDocSnap = await getDoc(userDocRef);
+        if (userDocSnap.exists()) {
+          userDocData = userDocSnap.data();
+          currentCompanyId = userDocData.companyId;
+        } else {
+          // 2. If it doesn't exist, query by email
+          const q = query(collection(db, 'users'), where('email', '==', user.email?.trim().toLowerCase()));
           const querySnapshot = await getDocs(q);
           if (!querySnapshot.empty) {
-            currentCompanyId = querySnapshot.docs[0].data().companyId;
-            if (currentCompanyId) {
-              setCompanyId(currentCompanyId);
-            }
+            const existingDoc = querySnapshot.docs[0];
+            const existingData = existingDoc.data();
+            currentCompanyId = existingData.companyId;
+
+            // Clone to their uid for seamless future reads & security rule compliance
+            userDocData = {
+              uid: user.uid,
+              name: existingData.name || user.displayName || 'User',
+              email: user.email?.trim().toLowerCase(),
+              role: existingData.role || 'view-only',
+              roleId: existingData.roleId || existingData.role || 'view-only',
+              companyId: existingData.companyId,
+              staffId: existingData.staffId || '',
+              createdAt: existingData.createdAt || new Date().toISOString()
+            };
+            await setDoc(doc(db, 'users', user.uid), userDocData);
           }
-        } catch (e) {
-          console.error("Error fetching user companyId:", e);
+        }
+      } catch (err) {
+        console.error("Error fetching or self-healing user record:", err);
+      }
+
+      // Automatically bootstrap Samira Traders for the admin email
+      if (user.email === 'samiratraders1@gmail.com') {
+        try {
+          // Ensure Company exists
+          await setDoc(doc(db, 'companies', 'samira-traders'), {
+            id: 'samira-traders',
+            name: 'Samira Traders',
+            logo: '',
+            address: 'Dhaka, Bangladesh',
+            phone: '+8801700000000',
+            email: 'samiratraders1@gmail.com',
+            status: 'active',
+            createdAt: new Date().toISOString()
+          }, { merge: true });
+
+          // Ensure License exists
+          await setDoc(doc(db, 'licenses', 'lic-samira'), {
+            id: "lic-samira",
+            companyId: "samira-traders",
+            plan: "Enterprise",
+            status: "active",
+            type: "Lifetime",
+            expiryDate: "2036-12-31"
+          }, { merge: true });
+
+          // Ensure Subscription exists
+          await setDoc(doc(db, 'subscriptions', 'sub-samira'), {
+            id: "sub-samira",
+            companyId: "samira-traders",
+            status: "active"
+          }, { merge: true });
+
+          // Ensure User document exists under UID
+          if (!userDocData) {
+            userDocData = {
+              uid: user.uid,
+              name: user.displayName || 'Samira Admin',
+              email: user.email?.trim().toLowerCase(),
+              role: 'admin',
+              roleId: 'admin',
+              companyId: 'samira-traders',
+              createdAt: new Date().toISOString()
+            };
+            await setDoc(doc(db, 'users', user.uid), userDocData);
+          }
+
+          // Ensure Admin document exists
+          await setDoc(doc(db, 'admins', user.uid), {
+            uid: user.uid,
+            email: user.email?.trim().toLowerCase(),
+            createdAt: new Date().toISOString()
+          }, { merge: true });
+
+          currentCompanyId = 'samira-traders';
+        } catch (err) {
+          console.error("Error bootstrapping admin records:", err);
         }
       }
 
-      if (!currentCompanyId) {
+      if (currentCompanyId) {
+        setCompanyId(currentCompanyId);
+      } else {
         setCompany(null);
         setLicense(null);
         setSubscription(null);

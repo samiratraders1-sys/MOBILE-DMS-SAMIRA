@@ -14,6 +14,27 @@ import { db, auth } from "../lib/firebase";
 import toast from "react-hot-toast";
 import { useCompany } from "../context/CompanyContext";
 
+function cleanUndefined(obj: any): any {
+  if (obj === null || obj === undefined) return null;
+  if (Array.isArray(obj)) {
+    return obj.map(item => cleanUndefined(item));
+  }
+  if (typeof obj === "object") {
+    if (obj.constructor && obj.constructor.name !== "Object" && obj.constructor.name !== "Array") {
+      return obj;
+    }
+    const clean: any = {};
+    Object.keys(obj).forEach(key => {
+      const val = obj[key];
+      if (val !== undefined) {
+        clean[key] = cleanUndefined(val);
+      }
+    });
+    return clean;
+  }
+  return obj;
+}
+
 enum OperationType {
   CREATE = 'create',
   UPDATE = 'update',
@@ -166,8 +187,9 @@ function getInitialMockData(collectionName: string): any[] {
 }
 
 export function useCollection<T>(collectionName: string) {
-  const { companyId: contextCompanyId, isReadOnly } = useCompany();
+  const { companyId: contextCompanyId, isReadOnly, loadingCompany } = useCompany();
   const companyId = contextCompanyId || localStorage.getItem("companyId");
+  const isSystemCollection = ["companies", "licenses", "subscriptions"].includes(collectionName);
   const [data, setData] = useState<T[]>([]);
   const [loading, setLoading] = useState(true);
   const [authCounter, setAuthCounter] = useState(0);
@@ -181,7 +203,28 @@ export function useCollection<T>(collectionName: string) {
   }, []);
 
   useEffect(() => {
+    if (loadingCompany) {
+        setLoading(true);
+        return;
+    }
+    
+    // Check if we are ready to fetch
+    // Only block if we are NOT in demo mode, NOT in a system collection, AND we don't have a companyId.
     const isDemoMode = localStorage.getItem("demo_user_session") !== null;
+    if (!isDemoMode && !auth.currentUser) {
+       setLoading(false);
+       return;
+    }
+
+    if (!isDemoMode && !isSystemCollection && !companyId) {
+      console.log("Collection fetch waiting for companyId:", {
+        companyId,
+        isSystemCollection,
+        collectionName
+      });
+      // Do not block, just keep loading = true
+      return;
+    }
 
     if (isDemoMode) {
       setLoading(true);
@@ -296,7 +339,8 @@ export function useCollection<T>(collectionName: string) {
     });
 
     return () => unsubscribeAuth();
-  }, [collectionName, authCounter, companyId]);
+  }, [collectionName, authCounter, companyId, loadingCompany]);
+
 
   const add = async (item: any) => {
     const isDemoMode = localStorage.getItem("demo_user_session") !== null;
@@ -305,13 +349,13 @@ export function useCollection<T>(collectionName: string) {
         const stored = localStorage.getItem(`demo_coll_${collectionName}`);
         const items = stored ? JSON.parse(stored) : [];
         const newId = `local_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-        const newItem = {
+        const newItem = cleanUndefined({
           id: newId,
           ...item,
           companyId: "samira-traders",
           createdBy: "demo-admin",
           createdAt: { seconds: Math.floor(Date.now() / 1000) }
-        };
+        });
         items.unshift(newItem);
         localStorage.setItem(`demo_coll_${collectionName}`, JSON.stringify(items));
         window.dispatchEvent(new CustomEvent("local-db-change", { detail: { collectionName } }));
@@ -331,8 +375,9 @@ export function useCollection<T>(collectionName: string) {
       }
       if (!auth.currentUser || (!companyId && !isSystemCollection)) throw new Error("Not logged in or no company selected");
       const isOffline = typeof navigator !== "undefined" && !navigator.onLine;
+      const cleanedItem = cleanUndefined(item);
       const docRef = await addDoc(collection(db, collectionName), {
-        ...item,
+        ...cleanedItem,
         ...(isSystemCollection ? {} : { companyId }),
         pending_changes: isOffline,
         createdBy: auth.currentUser.uid,
@@ -348,6 +393,7 @@ export function useCollection<T>(collectionName: string) {
       if (collectionName !== "activity_logs" && collectionName === "products") {
         try {
           await addDoc(collection(db, "activity_logs"), {
+            companyId: companyId,
             userEmail: auth.currentUser?.email || "unknown",
             userId: auth.currentUser?.uid || "unknown",
             actionType: "modify_inventory",
@@ -379,10 +425,10 @@ export function useCollection<T>(collectionName: string) {
         const items = stored ? JSON.parse(stored) : [];
         const index = items.findIndex((x: any) => x.id === id);
         if (index !== -1) {
-          items[index] = {
+          items[index] = cleanUndefined({
             ...items[index],
             ...item
-          };
+          });
           localStorage.setItem(`demo_coll_${collectionName}`, JSON.stringify(items));
           window.dispatchEvent(new CustomEvent("local-db-change", { detail: { collectionName } }));
           toast.success("সফলভাবে আপডেট করা হয়েছে");
@@ -408,8 +454,9 @@ export function useCollection<T>(collectionName: string) {
         productItem = data.find((x: any) => x.id === id);
       }
 
+      const cleanedItem = cleanUndefined(item);
       await updateDoc(doc(db, collectionName, id), {
-        ...item,
+        ...cleanedItem,
         pending_changes: isOffline,
       });
       if (isOffline) {
@@ -434,6 +481,7 @@ export function useCollection<T>(collectionName: string) {
           }
 
           await addDoc(collection(db, "activity_logs"), {
+            companyId: companyId,
             userEmail: auth.currentUser?.email || "unknown",
             userId: auth.currentUser?.uid || "unknown",
             actionType: "modify_inventory",
@@ -472,7 +520,6 @@ export function useCollection<T>(collectionName: string) {
       }
     }
 
-    console.log(`Attempting to remove doc from ${collectionName} with id: ${id}`);
     try {
       const isSystemCollection = ["companies", "licenses", "subscriptions"].includes(collectionName);
       if (isReadOnly && !isSystemCollection) {
@@ -482,7 +529,6 @@ export function useCollection<T>(collectionName: string) {
       // Find item in state before deleting
       const itemToDelete: any = data.find((x: any) => x.id === id);
       const itemName = itemToDelete?.name || itemToDelete?.customerName || itemToDelete?.description || itemToDelete?.title || id;
-      console.log(`Found item to delete: ${itemName}`);
 
       await deleteDoc(doc(db, collectionName, id));
       toast.success("সফলভাবে ডিলিট করা হয়েছে");
@@ -507,6 +553,7 @@ export function useCollection<T>(collectionName: string) {
           const label = collectionLabels[collectionName] || collectionName;
 
           await addDoc(collection(db, "activity_logs"), {
+            companyId: companyId,
             userEmail: auth.currentUser?.email || "unknown",
             userId: auth.currentUser?.uid || "unknown",
             actionType: "delete_record",

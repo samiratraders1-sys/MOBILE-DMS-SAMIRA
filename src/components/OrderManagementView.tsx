@@ -80,7 +80,7 @@ export default function OrderManagementView({ orders, updateOrder, products, cus
                   <td className="p-4 font-semibold">{o.date}</td>
                   <td className="p-4 font-bold">
                       {customer?.name || "অজানা গ্রাহক"}<br/>
-                      <span className="text-xs text-gray-500">{customer?.contactDetails?.phone}</span>
+                      <span className="text-xs text-gray-500">{customer?.contactDetails?.phone || customer?.phone}</span>
                   </td>
                   <td className="p-4 cursor-pointer hover:text-blue-600 underline" onClick={() => setSelectedOrder(o)}>{o.items?.length || 0}টি (বিস্তারিত)</td>
                   <td className="p-4 font-black">৳{o.totalAmount?.toLocaleString()}</td>

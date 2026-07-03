@@ -3,7 +3,7 @@ import { useLanguage } from "../context/LanguageContext";
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, AreaChart, Area, Legend
 } from 'recharts';
-import { Package, TrendingUp, Users, ShoppingCart, AlertTriangle, Sparkles, Loader2, ArrowRight, Truck, DollarSign, History, X, Download, FileText, Database, RefreshCw, Plus, BookOpen, Layers, ChevronRight, HelpCircle, ShieldCheck, Wallet } from "lucide-react";
+import { Package, TrendingUp, Users, ShoppingCart, AlertTriangle, Sparkles, Loader2, ArrowRight, Truck, DollarSign, History, X, Download, FileText, Database, RefreshCw, Plus, BookOpen, Layers, ChevronRight, HelpCircle, ShieldCheck, Wallet, Bell, CheckCircle } from "lucide-react";
 import { formatCurrency, formatNumber } from "../lib/utils";
 import { motion, AnimatePresence } from "motion/react";
 import { jsPDF } from "jspdf";
@@ -21,12 +21,13 @@ interface DashboardProps {
   payments?: any[];
   sales?: any[];
   activityLogs?: any[];
+  subDbs?: any[];
   setActiveView: (view: string) => void;
   role?: string;
   allowedViews?: string[];
 }
 
-export default function DashboardView({ products, summaries, customers, suppliers, purchases, routes, payments = [], sales = [], activityLogs = [], setActiveView, role, allowedViews }: DashboardProps) {
+export default function DashboardView({ products, summaries, customers, suppliers, purchases, routes, payments = [], sales = [], activityLogs = [], subDbs = [], setActiveView, role, allowedViews }: DashboardProps) {
   const { language, t, formatNumber } = useLanguage();
   const [aiInsight, setAiInsight] = useState<string | null>(null);
   const [loadingAi, setLoadingAi] = useState(false);
@@ -45,8 +46,8 @@ export default function DashboardView({ products, summaries, customers, supplier
   });
   const [lastSyncedCol, setLastSyncedCol] = useState<string | null>(null);
   const [isTestingSync, setIsTestingSync] = useState(false);
-  const [, setSyncMessage] = useState<string>("");
-  const [timeAgo, setTimeAgo] = useState<string>("এইমাত্র সিঙ্ক হয়েছে (Just Now)");
+  const [syncMessage, setSyncMessage] = useState<string>("");
+  const [lastSyncFormatted, setLastSyncFormatted] = useState<string>("এইমাত্র সিঙ্ক হয়েছে (Just Now)");
 
   const [lastManualBackupDate, setLastManualBackupDate] = useState<string | null>(() => {
     try {
@@ -214,14 +215,14 @@ export default function DashboardView({ products, summaries, customers, supplier
       const diffMins = Math.floor(diffSecs / 60);
 
       if (diffSecs < 15) {
-        setTimeAgo("সবেমাত্র (Just Now)");
+        setLastSyncFormatted("সবেমাত্র (Just Now)");
       } else if (diffSecs < 60) {
-        setTimeAgo(`${diffSecs} সেকেন্ড আগে`);
+        setLastSyncFormatted(`${diffSecs} সেকেন্ড আগে`);
       } else if (diffMins < 60) {
-        setTimeAgo(`${diffMins} মিনিট আগে`);
+        setLastSyncFormatted(`${diffMins} মিনিট আগে`);
       } else {
         const hours = Math.floor(diffMins / 60);
-        setTimeAgo(`${hours} ঘণ্টা আগে`);
+        setLastSyncFormatted(`${hours} ঘণ্টা আগে`);
       }
     };
 
@@ -863,6 +864,84 @@ export default function DashboardView({ products, summaries, customers, supplier
     return { activeSuppliers, pendingPurchases, totalOutstanding };
   }, [suppliers, purchases, payments]);
 
+  const pendingApprovalsList = useMemo(() => {
+    const list: Array<{ id: string; type: "sales" | "settlement" | "payment" | "subdb"; title: string; subtitle: string; amount?: number; date?: string }> = [];
+    
+    // 1. Sales
+    (sales || []).forEach((s: any) => {
+      if (s.status === "pending_approval" || s.approved === false) {
+        const custName = customers.find(c => c.id === s.customerId)?.name || s.customerName || "অজানা কাস্টমার";
+        list.push({
+          id: `sale-${s.id}`,
+          type: "sales",
+          title: `বিক্রয় অর্ডার অনুমোদন (${custName})`,
+          subtitle: `অর্ডার নম্বর: ${s.id?.slice(0, 8) || "N/A"} • তারিখ: ${s.date || "N/A"}`,
+          amount: s.totalAmount || s.netPayable || 0,
+          date: s.date
+        });
+      }
+    });
+
+    // 2. Settlements
+    (summaries || []).forEach((s: any) => {
+      if (s.status === "pending_approval" || s.approved === false) {
+        const routeName = routes.find(r => r.id === s.routeId)?.name || s.routeName || "অজানা রুট";
+        list.push({
+          id: `settle-${s.id}`,
+          type: "settlement",
+          title: `ডিএসআর সেটেলমেন্ট অনুমোদন (${routeName})`,
+          subtitle: `তারিখ: ${s.date || "N/A"} • এসআর: ${s.srName || "N/A"}`,
+          amount: s.totalCollection || s.cashReceived || 0,
+          date: s.date
+        });
+      }
+    });
+
+    // 3. Payments
+    (payments || []).forEach((p: any) => {
+      if (p.status === "pending_approval" || p.approved === false) {
+        let typeText = "পেমেন্ট";
+        if (p.type === "in") typeText = "কালেকশন";
+        else if (p.type === "transfer") typeText = "তহবিল স্থানান্তর";
+        list.push({
+          id: `payment-${p.id}`,
+          type: "payment",
+          title: `${typeText} অনুমোদন (${p.category || p.description || "অন্যান্য"})`,
+          subtitle: `অ্যাকাউন্ট: ${p.accountName || p.accountId || "N/A"} • বিবরণ: ${p.remarks || "নেই"}`,
+          amount: p.amount || 0,
+          date: p.date
+        });
+      }
+    });
+
+    // 4. Sub-DB
+    (subDbs || []).forEach((s: any) => {
+      if (s.status === "pending_approval" || s.approved === false) {
+        list.push({
+          id: `subdb-${s.id}`,
+          type: "subdb",
+          title: `সাব-ডিবি পয়েন্ট অনুমোদন (${s.name || "N/A"})`,
+          subtitle: `ফোন: ${s.phone || "N/A"} • ঠিকানা: ${s.address || "N/A"}`,
+          date: s.createdAt ? new Date(s.createdAt).toISOString().split('T')[0] : undefined
+        });
+      }
+    });
+
+    return list;
+  }, [sales, summaries, payments, subDbs, customers, routes]);
+
+  const lowStockItemsList = useMemo(() => {
+    return products
+      .filter(p => p.stock <= (p.minStockLevel || 5))
+      .map((p: any) => ({
+        id: p.id,
+        name: p.name,
+        stock: p.stock,
+        minStock: p.minStockLevel || 5,
+        unit: p.unit || "পিস"
+      }));
+  }, [products]);
+
   return (
     <div className="space-y-8 p-8 bg-gray-50 min-h-screen">
       <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 bg-white p-6 rounded-3xl border border-gray-100 shadow-sm">
@@ -892,6 +971,151 @@ export default function DashboardView({ products, summaries, customers, supplier
           )}
         </div>
       </header>
+      
+      {/* Action & Notification Center */}
+      <div className="bg-white rounded-3xl border border-gray-150 shadow-sm overflow-hidden">
+        <div className="bg-gradient-to-r from-slate-900 to-indigo-950 p-6 text-white flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="p-3 bg-white/10 rounded-2xl">
+              <Bell className="w-6 h-6 text-indigo-300 animate-bounce" />
+            </div>
+            <div>
+              <h3 className="text-lg font-black tracking-tight">অ্যাকশন ও নোটিফিকেশন হাব (Action & Notification Hub)</h3>
+              <p className="text-xs text-slate-300 mt-0.5 font-medium">আপনার তাৎক্ষণিক মনোযোগ প্রয়োজন এমন গুরুত্বপূর্ণ অনুমোদন এবং কম-স্টক পণ্যসমূহ</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="px-3 py-1 bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-full text-xs font-bold">
+              {pendingApprovalsList.length} টি অনুমোদন পেন্ডিং
+            </span>
+            <span className="px-3 py-1 bg-rose-500/20 text-rose-300 border border-rose-500/30 rounded-full text-xs font-bold">
+              {lowStockItemsList.length} টি লো-স্টক পণ্য
+            </span>
+          </div>
+        </div>
+
+        <div className="p-6 grid grid-cols-1 lg:grid-cols-2 gap-6 divide-y lg:divide-y-0 lg:divide-x divide-gray-150">
+          
+          {/* Column 1: Pending Approvals */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between pb-2">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-5 h-5 text-indigo-600" />
+                <h4 className="font-extrabold text-sm text-gray-900">জরুরি অনুমোদন পেন্ডিং (Urgent Approvals)</h4>
+              </div>
+              {pendingApprovalsList.length > 0 && (
+                <button 
+                  onClick={() => setActiveView("admin-approvals")}
+                  className="text-xs font-black text-indigo-600 hover:text-indigo-800 flex items-center gap-1 transition-all cursor-pointer"
+                >
+                  সব দেখুন <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            {pendingApprovalsList.length === 0 ? (
+              <div className="bg-emerald-50/50 border border-emerald-100 rounded-2xl p-6 flex flex-col items-center text-center space-y-2">
+                <CheckCircle className="w-10 h-10 text-emerald-500" />
+                <p className="text-xs font-bold text-emerald-800">সব অনুমোদন সম্পন্ন!</p>
+                <p className="text-[11px] text-emerald-600">বর্তমানে কোনো পেন্ডিং অনুমোদন নেই।</p>
+              </div>
+            ) : (
+              <div className="space-y-2.5 max-h-[300px] overflow-y-auto pr-1">
+                {pendingApprovalsList.slice(0, 5).map((item) => (
+                  <div key={item.id} className="p-3.5 bg-slate-50 border border-gray-150 rounded-2xl flex items-center justify-between gap-4 hover:bg-slate-100/70 transition-all">
+                    <div className="space-y-1 min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className={`text-[9px] font-extrabold px-2 py-0.5 rounded-md ${
+                          item.type === "sales" ? "bg-blue-100 text-blue-800" :
+                          item.type === "settlement" ? "bg-amber-100 text-amber-800" :
+                          item.type === "payment" ? "bg-purple-100 text-purple-800" : "bg-teal-100 text-teal-800"
+                        }`}>
+                          {item.type === "sales" ? "বিক্রয়" :
+                           item.type === "settlement" ? "সেটেলমেন্ট" :
+                           item.type === "payment" ? "লেনদেন" : "সাব-ডিবি"}
+                        </span>
+                        <span className="font-black text-gray-900 text-xs truncate">{item.title}</span>
+                      </div>
+                      <p className="text-[11px] text-gray-500 font-medium truncate">{item.subtitle}</p>
+                    </div>
+                    <div className="flex flex-col items-end shrink-0 gap-1.5">
+                      {item.amount !== undefined && (
+                        <span className="text-xs font-black text-gray-950">৳{item.amount.toLocaleString()}</span>
+                      )}
+                      <button 
+                        onClick={() => setActiveView("admin-approvals")}
+                        className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[10px] font-bold transition-all cursor-pointer shadow-xs"
+                      >
+                        অনুমোদন করুন
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {pendingApprovalsList.length > 5 && (
+                  <p className="text-center text-[11px] text-gray-400 font-medium pt-1">
+                    এবং আরও {pendingApprovalsList.length - 5} টি পেন্ডিং অনুমোদন রয়েছে...
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Column 2: Low Stock Alerts */}
+          <div className="space-y-4 pt-6 lg:pt-0 lg:pl-6">
+            <div className="flex items-center justify-between pb-2">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-rose-500" />
+                <h4 className="font-extrabold text-sm text-gray-900">লো-স্টক পণ্য সতর্কতা (Low Stock Alerts)</h4>
+              </div>
+              {lowStockItemsList.length > 0 && (
+                <button 
+                  onClick={() => setActiveView("inventory")}
+                  className="text-xs font-black text-rose-600 hover:text-rose-800 flex items-center gap-1 transition-all cursor-pointer"
+                >
+                  ইনভেন্টরি দেখুন <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            {lowStockItemsList.length === 0 ? (
+              <div className="bg-emerald-50/50 border border-emerald-100 rounded-2xl p-6 flex flex-col items-center text-center space-y-2">
+                <CheckCircle className="w-10 h-10 text-emerald-500" />
+                <p className="text-xs font-bold text-emerald-800">স্টক পর্যাপ্ত আছে!</p>
+                <p className="text-[11px] text-emerald-600">বর্তমানে কোনো পণ্যের রি-অর্ডার সীমা পার হয়নি।</p>
+              </div>
+            ) : (
+              <div className="space-y-2.5 max-h-[300px] overflow-y-auto pr-1">
+                {lowStockItemsList.slice(0, 5).map((prod) => (
+                  <div key={prod.id} className="p-3.5 bg-rose-50/30 border border-rose-100 rounded-2xl flex items-center justify-between gap-4 hover:bg-rose-50/50 transition-all">
+                    <div className="space-y-1 min-w-0 flex-1">
+                      <span className="font-black text-gray-900 text-xs truncate block">{prod.name}</span>
+                      <div className="flex items-center gap-2 text-[11px] font-bold text-gray-500">
+                        <span>বর্তমান স্টক: <strong className="text-rose-600 font-sans">{prod.stock}</strong> {prod.unit}</span>
+                        <span>•</span>
+                        <span>সীমা (Min): <span className="font-sans">{prod.minStock}</span> {prod.unit}</span>
+                      </div>
+                    </div>
+                    <div className="shrink-0">
+                      <button 
+                        onClick={() => setActiveView("purchase")}
+                        className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-[10px] font-bold transition-all cursor-pointer shadow-xs"
+                      >
+                        রি-অর্ডার
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {lowStockItemsList.length > 5 && (
+                  <p className="text-center text-[11px] text-gray-400 font-medium pt-1">
+                    এবং আরও {lowStockItemsList.length - 5} টি পণ্য রি-অর্ডার সীমার নিচে রয়েছে...
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
+        </div>
+      </div>
       
       {/* SRM Summary Card */}
       <div className="bg-white rounded-3xl border border-gray-100 shadow-sm p-6">
@@ -975,21 +1199,36 @@ export default function DashboardView({ products, summaries, customers, supplier
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={handleExportBackup}
-            disabled={isExportingBackup}
-            className={`w-full md:w-auto flex items-center justify-center gap-2 px-5 py-3 rounded-2xl text-xs font-extrabold transition-all border shadow-xs active:scale-95 shrink-0 cursor-pointer duration-100 ${
-              isExportingBackup 
-                ? "bg-amber-100 text-amber-400 border-amber-200 cursor-not-allowed" 
-                : "bg-amber-950 hover:bg-amber-900 text-white border-transparent"
-            }`}
-          >
-            <Download className={`w-4 h-4 ${isExportingBackup ? "animate-pulse" : ""}`} />
-            {isExportingBackup ? "ব্যাকআপ তৈরি হচ্ছে..." : "এখনই ব্যাকআপ ডাউনলোড করুন (Backup Now)"}
-          </button>
         </motion.div>
       )}
+
+      {/* Always Visible Backup Button */}
+      <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm flex items-center justify-between gap-5">
+        <div className="flex items-center gap-4">
+            <div className="p-3 bg-indigo-100 text-indigo-800 rounded-2xl shrink-0 flex items-center justify-center">
+              <Database className="w-6 h-6 text-indigo-600" />
+            </div>
+            <div>
+              <h4 className="font-extrabold text-sm text-gray-950">অফলাইন ডাটা ব্যাকআপ</h4>
+              <p className="text-xs text-gray-500 mt-0.5">সবসময় আপনার ডাটার একটি নিরাপদ কপি পিসিতে সংরক্ষণ করে রাখুন।</p>
+            </div>
+        </div>
+        <button
+          type="button"
+          onClick={handleExportBackup}
+          disabled={isExportingBackup}
+          className={`flex items-center justify-center gap-2 px-5 py-3 rounded-2xl text-xs font-extrabold transition-all border shadow-xs active:scale-95 shrink-0 cursor-pointer duration-100 ${
+            isExportingBackup 
+              ? "bg-indigo-100 text-indigo-400 border-indigo-200 cursor-not-allowed" 
+              : "bg-indigo-600 hover:bg-indigo-700 text-white border-transparent"
+          }`}
+        >
+          <Download className={`w-4 h-4 ${isExportingBackup ? "animate-pulse" : ""}`} />
+          {isExportingBackup ? "ব্যাকআপ তৈরি হচ্ছে..." : "ব্যাকআপ ডাউনলোড করুন"}
+        </button>
+
+      </div>
+
 
       {/* Cloud Sync Database Health Visual Indicator */}
       <motion.div 
@@ -1026,7 +1265,7 @@ export default function DashboardView({ products, summaries, customers, supplier
             <p className="text-gray-500 text-sm font-medium leading-relaxed">
               {isOnline ? (
                 <>
-                  ক্লাউডের সাথে ডাটাবেজ সফলভাবে সংযুক্ত আছে। সর্বশেষ সফল সিঙ্ক সময়: <span className="font-extrabold text-indigo-600 bg-indigo-50/70 px-2 py-0.5 rounded-md font-sans">{timeAgo}</span>
+                  ক্লাউডের সাথে ডাটাবেজ সফলভাবে সংযুক্ত আছে। সর্বশেষ সফল সিঙ্ক সময়: <span className="font-extrabold text-indigo-600 bg-indigo-50/70 px-2 py-0.5 rounded-md font-sans">{lastSyncFormatted}</span>
                   {lastSyncedCol && (
                     <span className="text-xs text-gray-400 font-bold ml-1.5 block sm:inline">
                       (আপডেট হয়েছে: <span className="text-gray-600">{lastSyncedCol}</span>)

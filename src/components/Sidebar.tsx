@@ -27,8 +27,6 @@ import {
   Sun,
   Moon,
   Layers,
-  Briefcase,
-  Cpu,
   Building2
 } from "lucide-react";
 import { cn } from "../lib/utils";
@@ -148,14 +146,6 @@ export default function Sidebar({ active, setActive, user, role, roles, onLogout
         { id: "pos", label: "নতুন বিক্রয় (POS)", icon: ShoppingCart },
         { id: "sales", label: "সেলস হিস্ট্রি", icon: FileText },
         { id: "damage-mgmt", label: "ড্যামেজ ও কোম্পানি রিটার্ন", icon: AlertTriangle },
-      ]
-    },
-    {
-      title: "অ্যাডভান্সড অপারেশনস ও এইচআর",
-      items: [
-        { id: "advanced-ops", label: "উন্নত অপারেশন ও এইচআর", icon: Layers },
-        { id: "dms-suite", label: "ডিএমএস এন্টারপ্রাইজ স্যুট", icon: Briefcase },
-        { id: "enterprise-suites", label: "এন্টারপ্রাইজ ইআরপি মডিউলসমূহ", icon: Cpu },
       ]
     },
     {

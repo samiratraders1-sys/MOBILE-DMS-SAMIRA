@@ -5,6 +5,7 @@ import ReportWrapper from "./ReportWrapper";
 import toast from "react-hot-toast";
 import MultiSelect from "./MultiSelect";
 import { recordStockMovement } from "../lib/inventoryEngine";
+import { useConfirm } from "../context/ConfirmContext";
 
 interface SalesProps {
   sales: any[];
@@ -53,14 +54,7 @@ export default function SalesView({
   const [editItems, setEditItems] = useState<any[]>([]);
   const [selectedAddProductId, setSelectedAddProductId] = useState("");
   const [isSaving, setIsSaving] = useState(false);
-
-  // Custom inline confirmation modal state
-  const [confirmModal, setConfirmModal] = useState<{
-    show: boolean;
-    title: string;
-    message: string;
-    onConfirm: () => void;
-  } | null>(null);
+  const { confirmDelete } = useConfirm();
 
   // Dynamic values list: unique product categories
   const categoriesList = React.useMemo(() => {
@@ -121,12 +115,9 @@ export default function SalesView({
 
   // Delete Action
   const handleDeleteSale = (sale: any) => {
-    setConfirmModal({
-      show: true,
-      title: "বিক্রয় রেকর্ড ডিলিট করুন",
-      message: "আপনি কি নিশ্চিতভাবে এই বিক্রয় রেকর্ডটি ডিলিট করতে চান? এটি ডিলিট করলে আইটেমসমূহের স্টক বৃদ্ধি করা হবে এবং কাস্টমারের বাকী ব্যালেন্স পূর্বাবস্থায় ফিরিয়ে নিয়ে যাওয়া হবে। এই অ্যাকশনটি পূর্বাবস্থায় ফিরিয়ে আনা যাবে না।",
+    confirmDelete({
+      recordName: `বিক্রয় মেমো #${sale.id ? sale.id.slice(0,6) : ""}`,
       onConfirm: async () => {
-        setConfirmModal(null);
         try {
           if (sale.approved || sale.status === "paid") {
             // Revert product stock
@@ -154,6 +145,7 @@ export default function SalesView({
         } catch (err: any) {
           console.error(err);
           toast.error("ডিলিট করতে সমস্যা হয়েছে: " + err.message);
+          throw err;
         }
       }
     });
@@ -566,34 +558,6 @@ export default function SalesView({
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
-
-      {/* CUSTOM INLINE CONFIRMATION MODAL TO BYPASS IFRAME RESTRICTIONS */}
-      {confirmModal && confirmModal.show && (
-        <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 p-4 transition-all backdrop-blur-xs animate-fade-in">
-          <div className="bg-white rounded-3xl p-6 max-w-md w-full border border-gray-150 shadow-2xl space-y-4 animate-scale-up">
-            <h3 className="text-base font-black text-gray-950 flex items-center gap-2">
-              <span className="w-1.5 h-4.5 bg-indigo-600 rounded-xs" /> {confirmModal.title}
-            </h3>
-            <p className="text-xs font-semibold text-gray-650 leading-relaxed whitespace-pre-line">
-              {confirmModal.message}
-            </p>
-            <div className="flex gap-3 pt-2">
-              <button 
-                onClick={() => setConfirmModal(null)}
-                className="flex-1 py-3 px-4 bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold border border-gray-200 rounded-xl text-xs transition-all cursor-pointer"
-              >
-                বাতিল করুন
-              </button>
-              <button 
-                onClick={confirmModal.onConfirm}
-                className="flex-1 py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold rounded-xl text-xs transition-all cursor-pointer"
-              >
-                নিশ্চিত করুন
-              </button>
-            </div>
           </div>
         </div>
       )}

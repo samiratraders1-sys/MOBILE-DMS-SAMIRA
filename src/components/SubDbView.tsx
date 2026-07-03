@@ -30,6 +30,7 @@ import { formatCurrency } from "../lib/utils";
 import { jsPDF } from "jspdf";
 import { recordStockMovement } from "../lib/inventoryEngine";
 import { MovementType } from "../lib/stockMovement";
+import { useConfirm } from "../context/ConfirmContext";
 
 interface SubDbViewProps {
   products: any[];
@@ -113,13 +114,7 @@ export default function SubDbView({
   const [reportMonth, setReportMonth] = useState(new Date().toISOString().slice(0, 7)); // e.g. "2026-05"
   const [reportType, setReportType] = useState<"daily" | "monthly">("daily");
   const [subDbProductSearch, setSubDbProductSearch] = useState("");
-
-  const [confirmModal, setConfirmModal] = useState<{
-    show: boolean;
-    title: string;
-    message: string;
-    onConfirm: () => void | Promise<void>;
-  } | null>(null);
+  const { confirmDelete } = useConfirm();
 
   const autoInitRef = useRef(false);
 
@@ -270,7 +265,15 @@ export default function SubDbView({
       }
     });
 
-    const profitFromCartons = totalCartons * 50; // Requested: "প্রফিট ক্যালকুলেশন থাকবে প্রতি কার্টুন এ ৫০ টাকা করে যত কার্টুন যায়"
+    let profitFromCartons = 0;
+    shipmentItems.forEach(draftItem => {
+      const p = products.find(prod => prod.id === draftItem.productId);
+      if (p) {
+        const cartons = Number(draftItem.cartons) || 0;
+        const margin = (p.cartonMarginSubDB !== undefined && p.cartonMarginSubDB !== null) ? Number(p.cartonMarginSubDB) : 50;
+        profitFromCartons += cartons * margin;
+      }
+    });
     const totalInvoice = totalAmount; // Normal Sales Invoice (no rent added to Sub-DB ledger)
     const totalSubDbProfit = profitFromCartons + Number(carriageRent || 0); // Profit formula for targets calculation
 
@@ -637,13 +640,12 @@ export default function SubDbView({
     };
 
     if (lowStockItems.length > 0) {
-      setConfirmModal({
-        show: true,
+      confirmDelete({
         title: "কম স্টকের সতর্কতা!",
-        message: `সতর্কতা: নিচের প্রোডাক্টগুলোর পর্যাপ্ত স্টক নেই। এটি মাইনাস স্টক লেভেলে চলে যাবে। চালিয়ে যাবেন?\n\n${lowStockItems.join("\n")}`,
-        onConfirm: () => {
-          setConfirmModal(null);
-          executeShipmentSave();
+        recordName: "পর্যাপ্ত স্টক ছাড়া চালান তৈরি",
+        warning: `সতর্কতা: নিচের প্রোডাক্টগুলোর পর্যাপ্ত স্টক নেই। এটি মাইনাস স্টক লেভেলে চলে যাবে। চালিয়ে যাবেন?\n\n${lowStockItems.join("\n")}`,
+        onConfirm: async () => {
+          await executeShipmentSave();
         }
       });
     } else {
@@ -1016,12 +1018,9 @@ export default function SubDbView({
 
   // ACTION: DELETE SHIPMENT INVOICE (With Stock + Bal recovery)
   const handleDeleteShipment = async (sh: any) => {
-    setConfirmModal({
-      show: true,
-      title: "চালান ডিলিট নিশ্চিতকরণ",
-      message: `আপনি কি চালান ${sh.id.slice(0, 8)} ডিলিট করতে চান? ডিলিট করলে স্টক এবং সাব-ডিবি ব্যালেন্স পুনরুদ্ধার করা হবে।`,
+    confirmDelete({
+      recordName: `চালান #${sh.id.slice(0, 8)}`,
       onConfirm: async () => {
-        setConfirmModal(null);
         try {
           // 1) Refill inventories
           for (const item of sh.items || []) {
@@ -1045,6 +1044,7 @@ export default function SubDbView({
           toast.success("চালানটি সফলভাবে ডিলিট ও রিভার্স করা হয়েছে!");
         } catch (err: any) {
           toast.error("ডিলিট করতে সমস্যা হয়েছে: " + err.message);
+          throw err;
         }
       }
     });
@@ -1444,12 +1444,11 @@ export default function SubDbView({
                     const pendingIds = Object.keys(selectedPendingSubDbs).filter(id => selectedPendingSubDbs[id]);
                     if (pendingIds.length === 0) return;
                     
-                    setConfirmModal({
-                      show: true,
+                    confirmDelete({
                       title: "একত্রিত বা বাল্ক অনুমোদন নিশ্চিতকরণ",
-                      message: `আপনি একই সাথে নির্বাচিত ${pendingIds.length} টি সাব-ডিলার পয়েন্ট অনুমোদন (approved: true) করতে চাচ্ছেন। চালিয়ে যাবেন?`,
+                      recordName: `${pendingIds.length} টি সাব-ডিলার পয়েন্ট`,
+                      warning: `আপনি একই সাথে নির্বাচিত ${pendingIds.length} টি সাব-ডিলার পয়েন্ট অনুমোদন (approved: true) করতে চাচ্ছেন। চালিয়ে যাবেন?`,
                       onConfirm: async () => {
-                        setConfirmModal(null);
                         try {
                           for (const dbId of pendingIds) {
                             await updateSubDb(dbId, {
@@ -1461,6 +1460,7 @@ export default function SubDbView({
                           toast.success(`${pendingIds.length} টি সাব-ডিলার পয়েন্ট সফলভাবে অনুমোদন করা হয়েছে!`);
                         } catch (err: any) {
                           toast.error("বাল্ক অনুমোদনে ত্রুটি ঘটেছে: " + err.message);
+                          throw err;
                         }
                       }
                     });
@@ -1521,17 +1521,15 @@ export default function SubDbView({
                             toast.error("সতর্কতা: এই সাব-ডিবির বকেয়া ব্যালেন্স আছে। বকেয়া শূন্য ছাড়া ডিলিট করা সমর্থন করে না!");
                             return;
                           }
-                          setConfirmModal({
-                            show: true,
-                            title: "সাব-ডিবি ডিলার পয়েন্ট ডিলিট নিশ্চিতকরণ",
-                            message: `আপনি কি সাব-ডিবি ডিলার পয়েন্ট '${item.name}' ডিলিট করতে চান?\n\nসতর্কতা: এই অ্যাকশনটি স্থায়ী এবং এর ফলে সকল সম্পর্কিত ডিরেক্টরি রেকর্ড মুছে ফেলা হবে।`,
+                          confirmDelete({
+                            recordName: item.name,
                             onConfirm: async () => {
-                              setConfirmModal(null);
                               try {
                                 await removeSubDb(item.id);
                                 toast.success("সাব-ডিবি ডিলার পয়েন্টটি সফলভাবে ডিলিট করা হয়েছে!");
                               } catch (e: any) {
                                 toast.error("ডিলিট করতে সমস্যা হয়েছে: " + e.message);
+                                throw e;
                               }
                             }
                           });
@@ -2078,12 +2076,9 @@ export default function SubDbView({
                           ) : (
                             <button 
                               onClick={async () => {
-                                setConfirmModal({
-                                  show: true,
-                                  title: "পেমেন্ট রেকর্ড ডিলিট নিশ্চিতকরণ",
-                                  message: "পেমেন্ট রেকর্ডটি ডিলিট করতে চান? সাব-ডিবির ব্যালেন্স পুনরুদ্ধার (বৃদ্ধি) করা হবে।",
+                                confirmDelete({
+                                  recordName: `পেমেন্ট রিসিট #${item.id.slice(0, 8)}`,
                                   onConfirm: async () => {
-                                    setConfirmModal(null);
                                     // Restore balance
                                     const subDbObj = subDbs.find(s => s.id === item.rawObj.entityId);
                                     if (subDbObj) {
@@ -2492,34 +2487,6 @@ export default function SubDbView({
                 <button type="submit" className="flex-1 btn-primary py-3 font-black text-xs cursor-pointer">সংরক্ষণ করুন</button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
-
-      {/* CUSTOM INLINE CONFIRMATION MODAL TO BYPASS IFRAME RESTRICTIONS */}
-      {confirmModal && confirmModal.show && (
-        <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 p-4 transition-all backdrop-blur-xs animate-fade-in">
-          <div className="bg-white rounded-3xl p-6 max-w-md w-full border border-gray-150 shadow-2xl space-y-4 animate-scale-up">
-            <h3 className="text-base font-black text-gray-950 flex items-center gap-2">
-              <span className="w-1.5 h-4.5 bg-indigo-600 rounded-xs" /> {confirmModal.title}
-            </h3>
-            <p className="text-xs font-semibold text-gray-650 leading-relaxed whitespace-pre-line">
-              {confirmModal.message}
-            </p>
-            <div className="flex gap-3 pt-2">
-              <button 
-                onClick={() => setConfirmModal(null)}
-                className="flex-1 py-3 px-4 bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold border border-gray-200 rounded-xl text-xs transition-all cursor-pointer"
-              >
-                বাতিল করুন
-              </button>
-              <button 
-                onClick={confirmModal.onConfirm}
-                className="flex-1 py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold rounded-xl text-xs transition-all cursor-pointer"
-              >
-                নিশ্চিত করুন
-              </button>
-            </div>
           </div>
         </div>
       )}

@@ -3,6 +3,8 @@ import { Plus, Search, Trash2, Pencil, X } from "lucide-react";
 import { formatCurrency } from "../lib/utils";
 import toast from "react-hot-toast";
 import { recordStockMovement } from "../lib/inventoryEngine";
+import { useFormAutoSave } from "../hooks/useFormAutoSave";
+import { useConfirm } from "../context/ConfirmContext";
 
 interface PurchaseViewProps {
   products: any[];
@@ -32,6 +34,27 @@ export default function PurchaseView({
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [paidAmount, setPaidAmount] = useState<number>(0);
 
+  // Auto-save form values to IndexedDB
+  const formStateToSave = React.useMemo(() => ({
+    selectedSupplier,
+    items,
+    invoiceId,
+    date,
+    paidAmount
+  }), [selectedSupplier, items, invoiceId, date, paidAmount]);
+
+  const { saveStatus, clearState } = useFormAutoSave(
+    "purchase-form",
+    formStateToSave,
+    (saved) => {
+      if (saved.selectedSupplier !== undefined) setSelectedSupplier(saved.selectedSupplier);
+      if (saved.items !== undefined) setItems(saved.items);
+      if (saved.invoiceId !== undefined) setInvoiceId(saved.invoiceId);
+      if (saved.date !== undefined) setDate(saved.date);
+      if (saved.paidAmount !== undefined) setPaidAmount(saved.paidAmount);
+    }
+  );
+
   // Edit States
   const [editingPurchase, setEditingPurchase] = useState<any | null>(null);
   const [editDate, setEditDate] = useState("");
@@ -40,14 +63,7 @@ export default function PurchaseView({
   const [editItems, setEditItems] = useState<any[]>([]);
   const [selectedAddProductId, setSelectedAddProductId] = useState("");
   const [isSaving, setIsSaving] = useState(false);
-
-  // Custom inline confirmation modal state
-  const [confirmModal, setConfirmModal] = useState<{
-    show: boolean;
-    title: string;
-    message: string;
-    onConfirm: () => void;
-  } | null>(null);
+  const { confirmDelete } = useConfirm();
 
   const filteredProducts = products.filter(p => p.supplierId === selectedSupplier);
 
@@ -107,6 +123,7 @@ export default function PurchaseView({
     setItems([]);
     setInvoiceId("");
     setPaidAmount(0);
+    await clearState();
     toast.success("পণ্য ক্রয় ও পেমেন্ট সফল হয়েছে!");
   };
 
@@ -115,12 +132,9 @@ export default function PurchaseView({
 
   // Delete Action for Purchase Invoice
   const handleDeletePurchase = (purchase: any) => {
-    setConfirmModal({
-      show: true,
-      title: "ক্রয় বিল ডিলিট করুন",
-      message: "আপনি কি নিশ্চিতভাবে এই ক্রয় ইনভয়েসটি ডিলিট করতে চান? ডিলিট করলে এর আইটেমসমূহের স্টক বিয়োগ করা হবে।",
+    confirmDelete({
+      recordName: `ক্রয় বিল #${purchase.invoiceId || purchase.id.slice(0,6)}`,
       onConfirm: async () => {
-        setConfirmModal(null);
         try {
           // Revert product stocks (record a negative movement)
           for (const item of purchase.items || []) {
@@ -138,6 +152,7 @@ export default function PurchaseView({
         } catch (err: any) {
           console.error(err);
           toast.error("ক্রয় বিল ডিলিট করতে সমস্যা হয়েছে: " + err.message);
+          throw err;
         }
       }
     });
@@ -251,7 +266,27 @@ export default function PurchaseView({
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-bold">নতুন পণ্য ক্রয়</h2>
+      <h2 className="text-2xl font-bold flex items-center gap-2 flex-wrap">
+        নতুন পণ্য ক্রয়
+        {saveStatus === "saving" && (
+          <span className="text-xs font-normal text-amber-600 bg-amber-50 border border-amber-100 px-2 py-0.5 rounded-full flex items-center gap-1">
+            <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" />
+            অটো-সেভ হচ্ছে...
+          </span>
+        )}
+        {saveStatus === "saved" && (
+          <span className="text-xs font-normal text-emerald-600 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-full flex items-center gap-1">
+            <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
+            অটো-সেভ সক্রিয়
+          </span>
+        )}
+        {saveStatus === "error" && (
+          <span className="text-xs font-normal text-rose-600 bg-rose-50 border border-rose-100 px-2 py-0.5 rounded-full flex items-center gap-1">
+            <span className="w-1.5 h-1.5 bg-rose-500 rounded-full" />
+            অটো-সেভ ত্রুটি
+          </span>
+        )}
+      </h2>
       
       <div className="bg-white p-6 rounded-2xl border flex gap-4 items-end">
         <div className="flex-1">
@@ -538,34 +573,6 @@ export default function PurchaseView({
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
-
-      {/* CUSTOM INLINE CONFIRMATION MODAL TO BYPASS IFRAME RESTRICTIONS */}
-      {confirmModal && confirmModal.show && (
-        <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 p-4 transition-all backdrop-blur-xs animate-fade-in">
-          <div className="bg-white rounded-3xl p-6 max-w-md w-full border border-gray-150 shadow-2xl space-y-4 animate-scale-up">
-            <h3 className="text-base font-black text-gray-950 flex items-center gap-2">
-              <span className="w-1.5 h-4.5 bg-indigo-600 rounded-xs" /> {confirmModal.title}
-            </h3>
-            <p className="text-xs font-semibold text-gray-650 leading-relaxed whitespace-pre-line">
-              {confirmModal.message}
-            </p>
-            <div className="flex gap-3 pt-2">
-              <button 
-                onClick={() => setConfirmModal(null)}
-                className="flex-1 py-3 px-4 bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold border border-gray-200 rounded-xl text-xs transition-all cursor-pointer"
-              >
-                বাতিল করুন
-              </button>
-              <button 
-                onClick={confirmModal.onConfirm}
-                className="flex-1 py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold rounded-xl text-xs transition-all cursor-pointer"
-              >
-                নিশ্চিত করুন
-              </button>
-            </div>
           </div>
         </div>
       )}

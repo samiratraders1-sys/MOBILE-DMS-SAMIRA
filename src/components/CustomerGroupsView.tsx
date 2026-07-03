@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Trash2, Edit2, Plus, Tag } from "lucide-react";
 import toast from "react-hot-toast";
 import { GROUP_COLOR_PRESETS } from "../lib/utils";
+import { useConfirm } from "../context/ConfirmContext";
 
 interface CustomerGroupsViewProps {
   customerGroups: any;
@@ -11,6 +12,7 @@ export default function CustomerGroupsView({ customerGroups }: CustomerGroupsVie
   const [groupName, setGroupName] = useState("");
   const [selectedPresetColor, setSelectedPresetColor] = useState(0);
   const [editingGroup, setEditingGroup] = useState<any | null>(null);
+  const { confirmDelete } = useConfirm();
 
   const handleSaveCustomerGroup = async () => {
     if (!groupName.trim()) {
@@ -42,14 +44,18 @@ export default function CustomerGroupsView({ customerGroups }: CustomerGroupsVie
   };
 
   const handleDeleteGroup = async (id: string, name: string) => {
-    if (window.confirm(`আপনি কি নিশ্চিতভাবে "${name}" গ্রুপটি মুছে ফেলতে চান?`)) {
-      try {
-        await customerGroups.remove(id);
-        toast.success("গ্রুপ ডিলিট হয়েছে");
-      } catch (error: any) {
-        toast.error("ডিলিট করতে সমস্যা: " + error.message);
+    confirmDelete({
+      recordName: name,
+      onConfirm: async () => {
+        try {
+          await customerGroups.remove(id);
+          toast.success("গ্রুপ ডিলিট হয়েছে");
+        } catch (error: any) {
+          toast.error("ডিলিট করতে সমস্যা: " + error.message);
+          throw error;
+        }
       }
-    }
+    });
   };
 
   return (

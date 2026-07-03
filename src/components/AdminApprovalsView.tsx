@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import { formatCurrency, getGroupColors } from "../lib/utils";
 import toast from "react-hot-toast";
+import { useConfirm } from "../context/ConfirmContext";
 
 interface AdminApprovalsProps {
   sales: any[];
@@ -52,6 +53,7 @@ export default function AdminApprovalsView({
   const [activeTab, setActiveTab] = useState<"sales" | "settlement" | "payments" | "subdb">("sales");
   const [processingIds, setProcessingIds] = useState<string[]>([]);
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
+  const { confirmDelete } = useConfirm();
 
   // Reset selection when tab changes
   React.useEffect(() => {
@@ -79,30 +81,36 @@ export default function AdminApprovalsView({
   const handleBulkAction = async (action: 'approve' | 'reject') => {
     if (selectedItems.length === 0) return;
     
+    const executeAction = async () => {
+      setProcessingIds(prev => [...prev, ...selectedItems]);
+      
+      const results = await Promise.allSettled(
+        selectedItems.map(async id => {
+          if (activeTab === 'sales') return action === 'approve' ? onApproveSale(id) : onRejectSale(id);
+          if (activeTab === 'settlement') return action === 'approve' ? onApproveSettlement(id) : onRejectSettlement(id);
+          if (activeTab === 'payments') return action === 'approve' ? onApprovePayment(id) : onRejectPayment(id);
+          if (activeTab === 'subdb' && onApproveSubDb && onRejectSubDb) return action === 'approve' ? onApproveSubDb(id) : onRejectSubDb(id);
+        })
+      );
+      
+      results.forEach((res, index) => {
+          if(res.status === 'rejected') toast.error(`আইডি ${selectedItems[index]} জন্য ব্যর্থ: ${res.reason}`);
+      });
+
+      setProcessingIds(prev => prev.filter(id => !selectedItems.includes(id)));
+      setSelectedItems([]);
+      toast.success("বাল্ক অ্যাকশন সম্পন্ন হয়েছে");
+    };
+
     // For rejection, require confirmation
     if (action === 'reject') {
-      const isConfirmed = window.confirm(`আপনি কি নিশ্চিতভাবে নির্বাচিত ${selectedItems.length}টি রেকর্ড নাকচ (বা মুছে ফেলা) করতে চান?`);
-      if (!isConfirmed) return;
+      confirmDelete({
+        recordName: `নির্বাচিত ${selectedItems.length}টি রেকর্ড`,
+        onConfirm: executeAction
+      });
+    } else {
+      await executeAction();
     }
-
-    setProcessingIds(prev => [...prev, ...selectedItems]);
-    
-    const results = await Promise.allSettled(
-      selectedItems.map(async id => {
-        if (activeTab === 'sales') return action === 'approve' ? onApproveSale(id) : onRejectSale(id);
-        if (activeTab === 'settlement') return action === 'approve' ? onApproveSettlement(id) : onRejectSettlement(id);
-        if (activeTab === 'payments') return action === 'approve' ? onApprovePayment(id) : onRejectPayment(id);
-        if (activeTab === 'subdb' && onApproveSubDb && onRejectSubDb) return action === 'approve' ? onApproveSubDb(id) : onRejectSubDb(id);
-      })
-    );
-    
-    results.forEach((res, index) => {
-        if(res.status === 'rejected') toast.error(`আইডি ${selectedItems[index]} জন্য ব্যর্থ: ${res.reason}`);
-    });
-
-    setProcessingIds(prev => prev.filter(id => !selectedItems.includes(id)));
-    setSelectedItems([]);
-    toast.success("বাল্ক অ্যাকশন সম্পন্ন হয়েছে");
   };
 
   const totalPendingCount = pendingSales.length + pendingSettlements.length + pendingPayments.length + pendingSubDbs.length;
@@ -125,20 +133,26 @@ export default function AdminApprovalsView({
   const handleRejectSubDb = async (id: string) => {
     if (processingIds.includes(id)) return;
     
-    const isConfirmed = window.confirm("আপনি কি নিশ্চিতভাবে এই সাব-ডিবি ডিলার পয়েন্ট রেকর্ডটি নাকচ (ডিলিট) করতে চান?\nনাকচ করার পর রেকর্ডটি স্থায়ীভাবে মুছে যাবে।");
-    if (!isConfirmed) return;
+    const subDb = subDbs.find(s => s.id === id);
+    const subDbName = subDb ? (subDb.name || subDb.pointName) : id;
 
-    setProcessingIds(prev => [...prev, id]);
-    try {
-      if (onRejectSubDb) {
-        await onRejectSubDb(id);
-        toast.success("সাব-ডিবি পয়েন্ট রেকর্ডটি নাকচ/মুছে ফেলা হয়েছে");
+    confirmDelete({
+      recordName: subDbName,
+      onConfirm: async () => {
+        setProcessingIds(prev => [...prev, id]);
+        try {
+          if (onRejectSubDb) {
+            await onRejectSubDb(id);
+            toast.success("সাব-ডিবি পয়েন্ট রেকর্ডটি নাকচ/মুছে ফেলা হয়েছে");
+          }
+        } catch (e: any) {
+          toast.error("নাকচ করতে সমস্যা হয়েছে: " + e.message);
+          throw e;
+        } finally {
+          setProcessingIds(prev => prev.filter(item => item !== id));
+        }
       }
-    } catch (e: any) {
-      toast.error("নাকচ করতে সমস্যা হয়েছে: " + e.message);
-    } finally {
-      setProcessingIds(prev => prev.filter(item => item !== id));
-    }
+    });
   };
 
   const handleApproveSale = async (id: string) => {

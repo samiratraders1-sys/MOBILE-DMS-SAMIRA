@@ -246,9 +246,24 @@ export default function DSRPortalView({
   };
 
   const handleSubmitDraft = async () => {
-    if (!activeSummary) return;
+    if (!activeSummary || !calculations) return;
     try {
+      // Build damageItems array from damageQtys dictionary
+      const constructedDamageItems = Object.entries(damageQtys)
+        .filter(([_, qty]) => Number(qty) > 0)
+        .map(([pId, qty]) => {
+          const product = products.find(p => p.id === pId);
+          const q = Number(qty);
+          const pr = Number(product?.price || 0);
+          return {
+            productId: pId,
+            quantity: q,
+            price: pr
+          };
+        });
+
       const payload = {
+        // Keep drafts too for safe reference
         draftReturnQtys: returnQtys,
         draftDamageQtys: damageQtys,
         draftFreeItems: freeItems,
@@ -256,11 +271,40 @@ export default function DSRPortalView({
         draftExpenses: expenses,
         draftCredits: credits,
         draftPayments: payments,
-        status: "submitted_by_dsr" // Changes status to tell manager it's ready!
+
+        // Set final fields for Admin Approvals panel and calculation engine
+        status: "pending_approval",
+        approved: false,
+        settlementDate: new Date().toISOString().split('T')[0],
+        items: calculations.items.map((item: any) => ({
+          productId: item.productId,
+          productName: item.productName || "",
+          totalPieces: item.totalPieces || 0,
+          price: item.price || 0,
+          returns: item.returns || 0,
+          damage: item.damage || 0,
+          soldQty: item.soldQty || 0,
+          saleValue: item.saleValue || 0
+        })),
+        freeItems: freeItems,
+        discountItems: discountItems,
+        damageItems: constructedDamageItems,
+        expenses: expenses.map(e => ({ type: e.type, amount: e.amount, description: e.description })),
+        credits: credits,
+        payments: payments,
+        salesValue: calculations.totalSalesValue,
+        totalFreeValue: calculations.totalFreeValue,
+        totalDiscountValue: calculations.totalDiscountValue,
+        totalDamageValue: constructedDamageItems.reduce((acc, d) => acc + (d.quantity * d.price), 0),
+        totalExpenses: calculations.totalExpensesValue,
+        totalCredits: calculations.totalCreditsValue,
+        totalPayments: calculations.totalPaymentsValue,
+        dsrPayable: calculations.dsrPayable,
+        dsrBalance: calculations.balance
       };
 
       await updateSummary(activeSummary.id, payload);
-      toast.success("সাফল্য! আজকের হিসাব সফলভাবে ম্যানেজারের প্যানেলে জমা দেওয়া হয়েছে।");
+      toast.success("সাফল্য! আজকের হিসাব সফলভাবে এডমিনের প্যানেলে অনুমোদনের জন্য পাঠানো হয়েছে।");
     } catch (e: any) {
       toast.error("হিসাব সাবমিট করতে সমস্যা হয়েছে: " + e.message);
     }
@@ -278,7 +322,7 @@ export default function DSRPortalView({
           ডিএসআর ডেলিভারি ও হিসাব পোর্টাল
         </h2>
         <p className="text-teal-100 text-xs md:text-sm max-w-2xl leading-relaxed">
-          আপনার আজকের ডেলিভারির প্রোডাক্টগুলোর রিটার্ন, ড্যামেজ, ফ্রি আইটেম, ডিসকাউন্ট, বিভিন্ন খরচ ও বাকি কাস্টমার কালেকশন এন্ট্রি দিন এবং সরাসরি ম্যানেজারের প্যানেলে জমা দিন।
+          আপনার আজকের ডেলিভারির প্রোডাক্টগুলোর রিটার্ন, ড্যামেজ, ফ্রি আইটেম, ডিসকাউন্ট, বিভিন্ন খরচ ও বাকি কাস্টমার কালেকশন এন্ট্রি দিন এবং সরাসরি এডমিন প্যানেলে অনুমোদনের জন্য পাঠান।
         </p>
 
         {/* If Admin/Manager simulated view */}
@@ -841,12 +885,12 @@ export default function DSRPortalView({
                   className="w-full py-4 bg-teal-600 hover:bg-teal-700 text-white font-black text-base rounded-2xl shadow-md transition-all active:scale-95 cursor-pointer flex items-center justify-center gap-2"
                 >
                   <Save className="w-5 h-5" />
-                  ম্যানেজারের নিকট রিপোর্ট পাঠান
+                  হিসাব চূড়ান্ত করে এডমিনের নিকট পাঠান
                 </button>
                 <div className="p-3 bg-teal-50 border border-teal-150 rounded-xl flex gap-2">
                   <Info className="w-4 h-4 text-teal-600 shrink-0 mt-0.5" />
                   <p className="text-[10px] text-teal-800 leading-normal">
-                    এটি সাবমিট করলে আপনার হিসাবের ড্রাফট ম্যানেজার প্যানেলে আপডেট হবে। বিকাল ১০টায় ম্যানেজার আপনার রি-কনসিলিয়েশন সম্পন্ন করবেন।
+                    এটি সাবমিট করলে আপনার সমস্ত হিসাব নিকাশ চূড়ান্ত অনুমোদনের জন্য এডমিনের কাছে চলে যাবে। এডমিন হিসাবসমূহ দেখে এপ্রুভ দিলে সব ব্যালেন্স ও স্টক আপডেট হয়ে যাবে।
                   </p>
                 </div>
               </div>

@@ -65,11 +65,11 @@ export default function CustomerManagementView({ customers, addCustomer, updateC
       { (showAdd || editingCustomer) && (
           <form onSubmit={handleAddOrUpdate} className="bg-gray-50 p-6 rounded-2xl space-y-4 border">
               <input name="name" defaultValue={editingCustomer?.name} placeholder="নাম" className="w-full p-2 border rounded-lg" required />
-              <input name="phone" defaultValue={editingCustomer?.contactDetails.phone} placeholder="ফোন" className="w-full p-2 border rounded-lg" required />
-              <input name="email" defaultValue={editingCustomer?.contactDetails.email} placeholder="ইমেইল" className="w-full p-2 border rounded-lg" />
-              <input name="address" defaultValue={editingCustomer?.contactDetails.address} placeholder="ঠিকানা" className="w-full p-2 border rounded-lg" />
-              <input name="preferredTime" defaultValue={editingCustomer?.deliveryPreferences.preferredTime} placeholder="পছন্দসই সময়" className="w-full p-2 border rounded-lg" />
-              <input name="deliveryInstructions" defaultValue={editingCustomer?.deliveryPreferences.deliveryInstructions} placeholder="ডেলিভারি নির্দেশনাবলী" className="w-full p-2 border rounded-lg" />
+              <input name="phone" defaultValue={editingCustomer?.contactDetails?.phone || editingCustomer?.phone || ""} placeholder="ফোন" className="w-full p-2 border rounded-lg" required />
+              <input name="email" defaultValue={editingCustomer?.contactDetails?.email || ""} placeholder="ইমেইল" className="w-full p-2 border rounded-lg" />
+              <input name="address" defaultValue={editingCustomer?.contactDetails?.address || editingCustomer?.address || ""} placeholder="ঠিকানা" className="w-full p-2 border rounded-lg" />
+              <input name="preferredTime" defaultValue={editingCustomer?.deliveryPreferences?.preferredTime || ""} placeholder="পছন্দসই সময়" className="w-full p-2 border rounded-lg" />
+              <input name="deliveryInstructions" defaultValue={editingCustomer?.deliveryPreferences?.deliveryInstructions || ""} placeholder="ডেলিভারি নির্দেশনাবলী" className="w-full p-2 border rounded-lg" />
               <div className="flex gap-2">
                   <button type="submit" className="bg-green-600 text-white px-4 py-2 rounded-lg font-bold">সেভ করুন</button>
                   <button type="button" onClick={() => { setShowAdd(false); setEditingCustomer(null); }} className="bg-gray-200 px-4 py-2 rounded-lg font-bold">বাতিল</button>
@@ -87,8 +87,8 @@ export default function CustomerManagementView({ customers, addCustomer, updateC
                         <button onClick={() => removeCustomer(customer.id)} className="text-rose-600"><Trash2 size={16}/></button>
                     </div>
                   </div>
-                  <p className="text-sm text-gray-600 flex items-center gap-2"><Phone size={14}/> {customer.contactDetails.phone}</p>
-                  <p className="text-sm text-gray-600 flex items-center gap-2"><MapPin size={14}/> {customer.contactDetails.address}</p>
+                  <p className="text-sm text-gray-600 flex items-center gap-2"><Phone size={14}/> {customer.contactDetails?.phone || customer.phone || "ফোন নম্বর নেই"}</p>
+                  <p className="text-sm text-gray-600 flex items-center gap-2"><MapPin size={14}/> {customer.contactDetails?.address || customer.address || "ঠিকানা নেই"}</p>
               </div>
           ))}
       </div>

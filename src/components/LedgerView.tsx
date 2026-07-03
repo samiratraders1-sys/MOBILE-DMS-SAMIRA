@@ -32,6 +32,7 @@ import {
 import toast from "react-hot-toast";
 import { getGroupColors } from "../lib/utils";
 import { calculateRunningBalance, LedgerTransaction } from "../lib/ledgerEngine";
+import { calculateLedger } from "../utils/ledgerCalculator";
 
 // Format numbers in "Lakh" formatting (e.g., 2,70,836 Tk.)
 const showTk = (val: number) => {
@@ -47,6 +48,7 @@ interface LedgerProps {
   payments: any[];
   purchases: any[];
   sales?: any[];
+  transactions?: any[];
   
   // Real DB actions injected from App.tsx
   addCustomer?: (item: any) => Promise<any>;
@@ -73,6 +75,7 @@ export default function LedgerView({
   payments = [], 
   purchases = [], 
   sales = [],
+  transactions = [],
   addCustomer,
   updateCustomer,
   addSupplier,
@@ -124,6 +127,7 @@ export default function LedgerView({
   const [payAccountId, setPayAccountId] = useState("");
   const [payNote, setPayNote] = useState("");
   const [payDate, setPayDate] = useState(new Date().toISOString().split("T")[0]);
+  const [paySupplierId, setPaySupplierId] = useState("all");
 
   // Direct Sale Form builder state
   const [saleItems, setSaleItems] = useState<any[]>([]); // { productId, qtyCartons, qtyPieces, rate, freeQty, name, cartonSize }
@@ -345,136 +349,69 @@ export default function LedgerView({
     return enrichedParties.find(p => p.id === selectedParty.id && p.type === selectedParty.type) || null;
   }, [selectedParty, enrichedParties]);
 
+  // Target Customer's Dues split per Supplier (Requested: Customer ledgers per supplier)
+  const customerSupplierDues = useMemo(() => {
+    if (!selectedParty || selectedParty.type !== "customer" || !selectedPartyObj) {
+      return [];
+    }
+
+    const { supplierBreakdown } = calculateLedger(
+      selectedParty.id,
+      "customer",
+      transactions,
+      suppliers,
+      products,
+      0
+    );
+
+    return supplierBreakdown
+      .map(item => ({
+        id: item.supplierId,
+        name: item.supplierName,
+        company: item.supplierName,
+        due: item.due,
+        sales: item.sales,
+        payments: item.payments,
+        returns: item.returns
+      }))
+      .filter(item => Math.abs(item.due) > 0.01 || item.sales > 0 || item.payments > 0 || item.returns > 0);
+  }, [selectedParty, selectedPartyObj, transactions, suppliers, products]);
+
   // Target Selected Party's detailed chronological ledger logs
   const selectedPartyLedgerLogs = useMemo(() => {
     if (!selectedParty) return [];
     const partyId = selectedParty.id;
     const type = selectedParty.type;
-    const logs: any[] = [];
 
-    if (type === "customer") {
-      // 1. Credit Sales from settlements
-      summaries.filter(s => s.status === 'settled').forEach(s => {
-        (s.credits || []).filter((c: any) => c.customerId === partyId).forEach((c: any, idx: number) => {
-          logs.push({
-            date: s.settlementDate || s.date || "N/A",
-            ref: `Sale: Route Settle`,
-            type: "Debit",
-            amount: Number(c.amount || 0),
-            description: `এসআর রুট ক্রেডিটে পণ্য বিক্রয় (${s.routeId || "সাধারণ"})`,
-            id: `settle_credit_${s.id}_${idx}`
-          });
-        });
-      });
+    const { logs } = calculateLedger(
+      partyId,
+      type,
+      transactions,
+      suppliers,
+      products,
+      0
+    );
 
-      // 2. Client direct POS Sales
-      sales.filter(s => s.customerId === partyId).forEach((s, idx) => {
-        logs.push({
-          date: s.date ? s.date.split("T")[0] : s.createdAt?.split("T")[0] || "N/A",
-          ref: `POS Bill #${s.id?.slice(-4).toUpperCase() || idx}`,
-          type: "Debit",
-          amount: Number(s.total || 0),
-          description: `সরাসরি পণ্য বিক্রয় (POS)`,
-          id: `pos_sale_${s.id || idx}`
-        });
-      });
+    const finishedLogs = logs.map(item => {
+      let isDebit = false;
+      if (type === "customer") {
+        isDebit = item.type === "sale" || item.type === "payment_out" || (item.type === "opening" && item.amount > 0);
+      } else if (type === "supplier") {
+        isDebit = item.type === "payment_out" || item.type === "return" || (item.type === "opening" && item.amount < 0);
+      } else if (type === "staff") {
+        isDebit = item.type === "payment_out" || item.type === "purchase";
+      }
 
-      // 3. Client payments / cash receipt
-      payments.filter(p => p.entityId === partyId).forEach((p, idx) => {
-        logs.push({
-          date: p.date || p.createdAt?.split("T")[0] || "N/A",
-          ref: `Payment ${p.type === "in" ? "In" : "Out"} #${p.id?.slice(-4).toUpperCase() || idx}`,
-          type: p.type === "in" ? "Credit" : "Debit",
-          amount: Number(p.amount || 0),
-          description: p.description || (p.type === "in" ? "টাকা গ্রহণ (ক্যাশ বক্স)" : "টাকা পরিশোধ (প্রোমোশন/ফেরত)"),
-          id: `payment_${p.id || idx}`
-        });
-      });
-    }
-
-    if (type === "supplier") {
-      // 1. Purchase Invoices
-      purchases.filter(p => p.supplierId === partyId).forEach((p, idx) => {
-        logs.push({
-          date: p.date || "N/A",
-          ref: `Purchase Invoice #${p.invoiceId || p.id?.slice(-4).toUpperCase() || idx}`,
-          type: "Credit",
-          amount: Number(p.total || 0),
-          description: `পণ্য ক্রয় ইনভয়েস`,
-          id: `purchase_${p.id || idx}`
-        });
-      });
-
-      // 2. Payments to suppliers
-      payments.filter(p => p.entityId === partyId).forEach((p, idx) => {
-        logs.push({
-          date: p.date || p.createdAt?.split("T")[0] || "N/A",
-          ref: `Payment ${p.type === "in" ? "In" : "Out"} #${p.id?.slice(-4).toUpperCase() || idx}`,
-          type: p.type === "in" ? "Credit" : "Debit",
-          amount: Number(p.amount || 0),
-          description: p.description || (p.type === "in" ? "সাপ্লায়ার রিফান্ড ইনওয়ার্ড" : "সাপ্লায়ার বিল পরিশোধ"),
-          id: `payment_${p.id || idx}`
-        });
-      });
-    }
-
-    if (type === "staff") {
-      // 1. Route settlements
-      summaries.filter(s => s.dsrId === partyId && s.status === 'settled').forEach(s => {
-        logs.push({
-          date: s.settlementDate || s.date || "N/A",
-          ref: `DSR Route Settle`,
-          type: "Credit",
-          amount: Number(s.salesValue || 0),
-          description: `রুট বিক্রয় কালেকশন সামারি জমা (রুট: ${s.routeId})`,
-          id: `settle_staff_${s.id}`
-        });
-
-        if (s.expenses && s.expenses.length > 0) {
-          const totalExp = s.expenses.reduce((acc: number, e: any) => acc + (e.amount || 0), 0);
-          logs.push({
-            date: s.settlementDate || s.date || "N/A",
-            ref: `Expense Voucher`,
-            type: "Debit",
-            amount: totalExp,
-            description: `রুট খরচ ভাউচার সমীকরণ`,
-            id: `settle_staff_exp_${s.id}`
-          });
-        }
-      });
-
-      // 2. Payments / cash transfers for staff
-      payments.filter(p => p.entityId === partyId).forEach((p, idx) => {
-        logs.push({
-          date: p.date || p.createdAt?.split("T")[0] || "N/A",
-          ref: `Transfer #${p.id?.slice(-4).toUpperCase() || idx}`,
-          type: p.type === "in" ? "Credit" : "Debit",
-          amount: Number(p.amount || 0),
-          description: p.description || `স্টাফ ক্যাশ হ্যান্ডলিং লেনদেন (${p.method})`,
-          id: `payment_${p.id || idx}`
-        });
-      });
-    }
-
-    // To calculate the cumulative running balance correctly, we must sum chronologically (oldest first),
-    // then reverse the array so the newest matches the top listing.
-    const ledgerLogs: LedgerTransaction[] = logs.map(item => ({
-      id: item.id,
-      partyId: partyId,
-      partyType: type === "customer" ? "CUSTOMER" : type === "supplier" ? "SUPPLIER" : "STAFF",
-      type: item.type === "Debit" ? "DEBIT" : "CREDIT",
-      amount: item.amount,
-      description: item.description,
-      ref: item.ref,
-      date: item.date,
-      timestamp: Date.parse(item.date) || 0,
-    }));
-
-    const finishedLogsWithBalance = calculateRunningBalance(ledgerLogs, type === "customer" ? "CUSTOMER" : type === "supplier" ? "SUPPLIER" : "STAFF");
-    const finishedLogs = finishedLogsWithBalance.map(item => ({
-        ...item,
-        ref: item.ref,
-    }));
+      return {
+        id: item.id,
+        date: item.date,
+        ref: item.refId ? `রসিদ #${item.refId.slice(-4).toUpperCase()}` : "লেনদেন",
+        type: isDebit ? "Debit" : "Credit",
+        amount: item.amount,
+        description: item.description,
+        runningBalance: item.runningBalance
+      };
+    });
 
     // Apply history query filter
     const term = historySearch.toLowerCase();
@@ -484,9 +421,8 @@ export default function LedgerView({
       l.date.includes(term)
     );
 
-    // Latest on top
-    return filteredLogs.reverse();
-  }, [selectedParty, summaries, sales, payments, purchases, historySearch]);
+    return filteredLogs;
+  }, [selectedParty, transactions, suppliers, products, historySearch]);
 
   // Quick reminder SMS builder helper
   const handleCopySMS = (party: any) => {
@@ -580,6 +516,7 @@ export default function LedgerView({
         category: selectedPartyObj.type === "customer" ? "Customer Collection" : "Refunding Inward",
         description: payNote.trim() || `ক্যাশ ইন: ${selectedPartyObj.name} থেকে টাকা জমা`,
         entityId: selectedPartyObj.id,
+        supplierId: selectedPartyObj.type === "customer" ? paySupplierId : selectedPartyObj.id,
         method: payMethod,
         accountId: payAccountId || "cash",
         status: "approved",
@@ -632,6 +569,7 @@ export default function LedgerView({
         category: selectedPartyObj.type === "supplier" ? "Supplier Payment" : "Expense Collection",
         description: payNote.trim() || `ক্যাশ আউট: ${selectedPartyObj.name} কে পরিশোধ`,
         entityId: selectedPartyObj.id,
+        supplierId: selectedPartyObj.type === "customer" ? paySupplierId : selectedPartyObj.id,
         method: payMethod,
         accountId: payAccountId || "cash",
         status: "approved",
@@ -976,6 +914,135 @@ export default function LedgerView({
             </div>
           </div>
 
+          {/* Enterprise-grade Tab Selector - Perfect alignment with dashboard standards */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            {[
+              {
+                id: "all",
+                label: "সব পার্টি খাতা (All Ledgers)",
+                count: enrichedParties.length,
+                color: "emerald",
+                icon: Users,
+                desc: "ব্যবসায়ের সামগ্রিক হিসাবের সারসংক্ষেপ",
+                totalLabel: "নেট বকেয়া (Net Owed)",
+                totalValue: enrichedParties.reduce((sum, p) => {
+                  const isReceive = (p.type === "customer" && p.computedBalance > 0) || (p.type === "staff" && p.computedBalance > 0) || (p.type === "supplier" && p.computedBalance < 0);
+                  return sum + (isReceive ? p.computedBalance : -Math.abs(p.computedBalance));
+                }, 0)
+              },
+              {
+                id: "customer",
+                label: "কাস্টমার লেজার (Customer)",
+                count: customers.length,
+                color: "indigo",
+                icon: User,
+                desc: "গ্রাহকদের প্রাপ্য ও কালেকশন হিসাব",
+                totalLabel: "মোট প্রাপ্য বকেয়া",
+                totalValue: enrichedParties.reduce((sum, p) => sum + (p.type === "customer" && p.computedBalance > 0 ? p.computedBalance : 0), 0)
+              },
+              {
+                id: "supplier",
+                label: "সাপ্লায়ার লেজার (Supplier)",
+                count: suppliers.length,
+                color: "amber",
+                icon: ShoppingCart,
+                desc: "সরবরাহকারীদের প্রদেয় ও ক্রয় হিসাব",
+                totalLabel: "মোট প্রদেয় বকেয়া",
+                totalValue: enrichedParties.reduce((sum, p) => sum + (p.type === "supplier" && p.computedBalance > 0 ? p.computedBalance : 0), 0)
+              },
+              {
+                id: "staff",
+                label: "কর্মচারী ও SR লেজার (Staff)",
+                count: staff.length,
+                color: "purple",
+                icon: Wallet,
+                desc: "স্টাফ ও এসআরদের ক্যাশ ও সমন্বয় হিসাব",
+                totalLabel: "মোট স্টাফ ব্যালেন্স",
+                totalValue: enrichedParties.reduce((sum, p) => sum + (p.type === "staff" && p.computedBalance > 0 ? p.computedBalance : 0), 0)
+              }
+            ].map(tab => {
+              const Icon = tab.icon;
+              const isActive = partyTypeTab === tab.id;
+              
+              const colors = {
+                emerald: {
+                  activeBg: "bg-emerald-600",
+                  activeText: "text-white",
+                  border: "border-emerald-100",
+                  bgLight: "bg-emerald-50 text-emerald-700",
+                  ring: "ring-2 ring-emerald-500 ring-offset-2",
+                  iconColor: "text-emerald-600",
+                },
+                indigo: {
+                  activeBg: "bg-indigo-600",
+                  activeText: "text-white",
+                  border: "border-indigo-100",
+                  bgLight: "bg-indigo-50 text-indigo-700",
+                  ring: "ring-2 ring-indigo-500 ring-offset-2",
+                  iconColor: "text-indigo-600",
+                },
+                amber: {
+                  activeBg: "bg-amber-600",
+                  activeText: "text-white",
+                  border: "border-amber-100",
+                  bgLight: "bg-amber-50 text-amber-700",
+                  ring: "ring-2 ring-amber-500 ring-offset-2",
+                  iconColor: "text-amber-600",
+                },
+                purple: {
+                  activeBg: "bg-purple-600",
+                  activeText: "text-white",
+                  border: "border-purple-100",
+                  bgLight: "bg-purple-50 text-purple-700",
+                  ring: "ring-2 ring-purple-500 ring-offset-2",
+                  iconColor: "text-purple-600",
+                }
+              }[tab.color as "emerald" | "indigo" | "amber" | "purple"];
+
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => {
+                    setPartyTypeTab(tab.id as any);
+                    setRelationshipFilter("all");
+                  }}
+                  className={`flex flex-col text-left p-5 rounded-3xl border transition-all duration-300 cursor-pointer outline-none relative overflow-hidden group shadow-xs ${
+                    isActive 
+                      ? `${colors.activeBg} ${colors.activeText} border-transparent ${colors.ring} shadow-md scale-[1.02]` 
+                      : `bg-white hover:bg-slate-50 border-gray-150`
+                  }`}
+                >
+                  <div className="flex justify-between items-start w-full">
+                    <div className={`p-2.5 rounded-2xl ${isActive ? 'bg-white/20 text-white' : `${colors.bgLight}`} transition-colors`}>
+                      <Icon className="w-5 h-5" />
+                    </div>
+                    <span className={`text-[10px] font-black px-2.5 py-0.5 rounded-full ${
+                      isActive ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600'
+                    }`}>
+                      {tab.count} টি রেকর্ড
+                    </span>
+                  </div>
+
+                  <div className="mt-4">
+                    <h3 className="font-extrabold text-sm tracking-tight">{tab.label}</h3>
+                    <p className={`text-[11px] mt-0.5 font-medium ${isActive ? 'text-white/80' : 'text-gray-400'}`}>
+                      {tab.desc}
+                    </p>
+                  </div>
+
+                  <div className={`mt-4 pt-3 border-t w-full flex justify-between items-center ${isActive ? 'border-white/20' : 'border-gray-100'}`}>
+                    <span className={`text-[10px] font-bold uppercase tracking-wider ${isActive ? 'text-white/70' : 'text-gray-400'}`}>
+                      {tab.totalLabel}
+                    </span>
+                    <span className="font-black text-xs tracking-tight">
+                      {showTk(tab.totalValue)}
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          
           {/* Tab Filters and Search Bar Container */}
           <div className="bg-white p-5 rounded-3xl border border-gray-150 space-y-4">
             <div className="flex flex-col md:flex-row gap-3">
@@ -1075,21 +1142,6 @@ export default function LedgerView({
                     })}
                   </div>
                 )}
-              </div>
-
-              {/* Party Type Filter Row (All, Customer, Supplier, Staff) */}
-              <div className="flex bg-slate-50 p-1 rounded-xl border">
-                {(["all", "customer", "supplier", "staff"] as const).map(t => (
-                  <button
-                    key={t}
-                    onClick={() => setPartyTypeTab(t)}
-                    className={`px-4 py-2 rounded-lg font-bold text-xs transition-all cursor-pointer ${
-                      partyTypeTab === t ? "bg-white text-emerald-700 shadow-sm" : "text-gray-400"
-                    }`}
-                  >
-                    {t === "all" ? "সব পার্টি" : t === "customer" ? "কাস্টমার" : t === "supplier" ? "সাপ্লায়ার" : "স্টাফ/SR"}
-                  </button>
-                ))}
               </div>
             </div>
 
@@ -1348,6 +1400,34 @@ export default function LedgerView({
                 )}
               </div>
             </div>
+
+            {/* Supplier-wise Dues Breakdown Panel (Requested: Customer ledgers per supplier) */}
+            {selectedPartyObj?.type === "customer" && customerSupplierDues.length > 0 && (
+              <div className="px-6 py-4 bg-amber-50/40 border-b border-gray-100">
+                <p className="text-[10px] font-black text-amber-800 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
+                  🏢 সাপ্লায়ার ভিত্তিক বকেয়া খতিয়ান (Dues per Supplier)
+                </p>
+                <div className="space-y-2">
+                  {customerSupplierDues.map((item) => (
+                    <div key={item.id} className="flex justify-between items-center bg-white px-3 py-2 rounded-xl border border-amber-100 shadow-2xs">
+                      <div className="flex flex-col">
+                        <span className="text-xs font-bold text-gray-900">{item.name}</span>
+                        {item.company && item.company !== item.name && (
+                          <span className="text-[10px] text-gray-400 font-medium">{item.company}</span>
+                        )}
+                      </div>
+                      <span className="text-xs font-bold text-red-650 bg-red-50 px-2.5 py-1 rounded-lg">
+                        {showTk(item.due)}
+                      </span>
+                    </div>
+                  ))}
+                  <div className="flex justify-between items-center border-t border-dashed border-amber-200/65 pt-2 text-[11px] font-bold text-slate-500">
+                    <span>সর্বমোট বকেয়া (Total Due):</span>
+                    <span>{showTk(selectedPartyObj.computedBalance)}</span>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Quick Action Interactive Buttons (Imitation of Image 2 UI row) */}
             <div className="grid grid-cols-4 gap-2 px-6 py-4 border-b border-gray-100 bg-white text-center">
@@ -1650,6 +1730,22 @@ export default function LedgerView({
                 />
               </div>
 
+              {selectedPartyObj.type === "customer" && (
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-gray-400 block uppercase">সাপ্লায়ার নির্বাচন (Supplier Selection) *</label>
+                  <select
+                    value={paySupplierId}
+                    onChange={e => setPaySupplierId(e.target.value)}
+                    className="w-full text-xs p-3 border border-gray-250 rounded-xl bg-white text-slate-700 font-bold"
+                  >
+                    <option value="all">সাধারণ / সমস্ত সাপ্লায়ার (All Suppliers)</option>
+                    {suppliers.map(s => (
+                      <option key={s.id} value={s.id}>{s.company || s.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="text-[10px] font-bold text-gray-400 block uppercase">পেমেন্ট মাধ্যম</label>
@@ -1761,6 +1857,22 @@ export default function LedgerView({
                   className="w-full text-xs p-3 border border-gray-250 rounded-xl focus:ring-1 focus:ring-indigo-500 font-bold text-red-650 text-md"
                 />
               </div>
+
+              {selectedPartyObj.type === "customer" && (
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-gray-400 block uppercase">সাপ্লায়ার নির্বাচন (Supplier Selection) *</label>
+                  <select
+                    value={paySupplierId}
+                    onChange={e => setPaySupplierId(e.target.value)}
+                    className="w-full text-xs p-3 border border-gray-250 rounded-xl bg-white text-slate-700 font-bold"
+                  >
+                    <option value="all">সাধারণ / সমস্ত সাপ্লায়ার (All Suppliers)</option>
+                    {suppliers.map(s => (
+                      <option key={s.id} value={s.id}>{s.company || s.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">

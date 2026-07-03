@@ -41,6 +41,11 @@ export default function SupplierManagementView({ suppliers, purchases, payments,
     
     const supplierData = {
         name: formData.get("name") as string,
+        company: formData.get("company") as string,
+        mobile: formData.get("phone") as string,
+        address: formData.get("address") as string,
+        paymentTerms: formData.get("paymentTerms") as string,
+        claimPolicy: formData.get("claimPolicy") as string,
         contactDetails: {
             phone: formData.get("phone") as string,
             email: formData.get("email") as string,
@@ -99,32 +104,87 @@ export default function SupplierManagementView({ suppliers, purchases, payments,
       </div>
 
       { (showAdd || editingSupplier) && (
-          <form onSubmit={handleAddOrUpdate} className="bg-gray-50 p-6 rounded-2xl space-y-4 border">
-              <input name="name" defaultValue={editingSupplier?.name} placeholder="নাম" className="w-full p-2 border rounded-lg" required />
-              <input name="phone" defaultValue={editingSupplier?.contactDetails.phone} placeholder="ফোন" className="w-full p-2 border rounded-lg" required />
-              <input name="email" defaultValue={editingSupplier?.contactDetails.email} placeholder="ইমেইল" className="w-full p-2 border rounded-lg" />
-              <input name="address" defaultValue={editingSupplier?.contactDetails.address} placeholder="ঠিকানা" className="w-full p-2 border rounded-lg" />
-              <div className="flex gap-2">
-                  <button type="submit" className="bg-green-600 text-white px-4 py-2 rounded-lg font-bold">সেভ করুন</button>
-                  <button type="button" onClick={() => { setShowAdd(false); setEditingSupplier(null); }} className="bg-gray-200 px-4 py-2 rounded-lg font-bold">বাতিল</button>
+          <form onSubmit={handleAddOrUpdate} className="bg-white p-6 rounded-2xl space-y-4 border shadow-sm max-w-xl">
+              <h3 className="text-lg font-bold text-gray-900 border-b pb-2">
+                  {editingSupplier ? "বিক্রেতা তথ্য পরিবর্তন করুন" : "নতুন বিক্রেতা যোগ করুন"}
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">সাপ্লায়ারের নাম *</label>
+                      <input name="name" defaultValue={editingSupplier?.name} placeholder="সাপ্লায়ারের নাম" className="w-full p-2.5 border rounded-xl text-sm" required />
+                  </div>
+                  <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">কোম্পানির নাম</label>
+                      <input name="company" defaultValue={editingSupplier?.company} placeholder="কোম্পানি বা ব্র্যান্ডের নাম" className="w-full p-2.5 border rounded-xl text-sm" />
+                  </div>
+                  <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">মোবাইল নম্বর *</label>
+                      <input name="phone" defaultValue={editingSupplier?.mobile || editingSupplier?.contactDetails?.phone || ""} placeholder="মোবাইল নম্বর" className="w-full p-2.5 border rounded-xl text-sm" required />
+                  </div>
+                  <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">ইমেইল</label>
+                      <input name="email" type="email" defaultValue={editingSupplier?.contactDetails?.email || ""} placeholder="ইমেইল" className="w-full p-2.5 border rounded-xl text-sm" />
+                  </div>
+                  <div className="md:col-span-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">ঠিকানা</label>
+                      <input name="address" defaultValue={editingSupplier?.address || editingSupplier?.contactDetails?.address || ""} placeholder="ঠিকানা" className="w-full p-2.5 border rounded-xl text-sm" />
+                  </div>
+                  <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">পেমেন্ট শর্তাবলী (Payment Terms)</label>
+                      <input name="paymentTerms" defaultValue={editingSupplier?.paymentTerms} placeholder="যেমন: ১৫ দিন ক্রেডিট, ক্যাশ ইত্যাদি" className="w-full p-2.5 border rounded-xl text-sm" />
+                  </div>
+                  <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">দাবি পলিসি (Claim Policy)</label>
+                      <input name="claimPolicy" defaultValue={editingSupplier?.claimPolicy} placeholder="যেমন: ড্যামেজ পণ্য রিটার্নযোগ্য" className="w-full p-2.5 border rounded-xl text-sm" />
+                  </div>
+              </div>
+              <div className="flex gap-3 pt-2">
+                  <button type="submit" className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2.5 rounded-xl font-bold text-sm transition">সেভ করুন</button>
+                  <button type="button" onClick={() => { setShowAdd(false); setEditingSupplier(null); }} className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 py-2.5 rounded-xl font-bold text-sm transition">বাতিল</button>
               </div>
           </form>
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredSuppliers.map(supplier => (
-              <div key={supplier.id} className="bg-white p-4 rounded-xl border shadow-sm">
-                  <div className="flex justify-between items-start">
-                    <h3 className="font-bold text-lg">{supplier.name}</h3>
-                    <div className="flex gap-2">
-                        <button onClick={() => setEditingSupplier(supplier)} className="text-blue-600"><Edit2 size={16}/></button>
-                        <button onClick={() => removeSupplier(supplier.id)} className="text-rose-600"><Trash2 size={16}/></button>
-                    </div>
+              <div key={supplier.id} className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm hover:shadow-md transition duration-300 flex flex-col justify-between">
+                  <div>
+                      <div className="flex justify-between items-start mb-2">
+                          <div>
+                              <h3 className="font-bold text-lg text-gray-950">{supplier.name}</h3>
+                              {supplier.company && (
+                                  <span className="inline-block mt-1 px-2.5 py-1 bg-blue-50 text-blue-700 rounded-xl text-xs font-semibold">
+                                      🏢 {supplier.company}
+                                  </span>
+                              )}
+                          </div>
+                          <div className="flex gap-2">
+                              <button onClick={() => setEditingSupplier(supplier)} className="text-blue-600 hover:text-blue-800 p-1 rounded hover:bg-blue-50 transition"><Edit2 size={16}/></button>
+                              <button onClick={() => removeSupplier(supplier.id)} className="text-rose-600 hover:text-rose-800 p-1 rounded hover:bg-rose-50 transition"><Trash2 size={16}/></button>
+                          </div>
+                      </div>
+                      
+                      <div className="space-y-1.5 my-3 text-sm text-gray-600">
+                          <p className="flex items-center gap-2"><Phone size={14} className="text-gray-400" /> <b>মোবাইল:</b> {supplier.mobile || supplier.contactDetails?.phone || ""}</p>
+                          {(supplier.address || supplier.contactDetails?.address) && (
+                              <p className="flex items-center gap-2"><MapPin size={14} className="text-gray-400" /> <b>ঠিকানা:</b> {supplier.address || supplier.contactDetails?.address || ""}</p>
+                          )}
+                          {supplier.paymentTerms && (
+                              <p className="text-xs bg-gray-50 p-2 rounded-xl border border-gray-100">
+                                  <b>💳 পেমেন্ট শর্তাবলী:</b> {supplier.paymentTerms}
+                              </p>
+                          )}
+                          {supplier.claimPolicy && (
+                              <p className="text-xs bg-gray-50 p-2 rounded-xl border border-gray-100">
+                                  <b>📋 দাবি পলিসি (Claim):</b> {supplier.claimPolicy}
+                              </p>
+                          )}
+                      </div>
                   </div>
-                  <p className="text-sm text-gray-600 flex items-center gap-2"><Phone size={14}/> {supplier.contactDetails.phone}</p>
+
                   <div className="mt-4 flex gap-2">
-                    <button onClick={() => setSelectedSupplier(supplier)} className="flex-1 bg-gray-100 hover:bg-gray-200 text-sm font-bold py-2 rounded-lg">বিস্তারিত</button>
-                    <button onClick={() => { setSelectedSupplierForPayment(supplier); setShowPaymentModal(true); }} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold py-2 rounded-lg">Quick Pay</button>
+                      <button onClick={() => setSelectedSupplier(supplier)} className="flex-1 bg-gray-100 hover:bg-gray-200 text-[#1A1A1A] text-sm font-bold py-2.5 rounded-xl transition">বিস্তারিত</button>
+                      <button onClick={() => { setSelectedSupplierForPayment(supplier); setShowPaymentModal(true); }} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold py-2.5 rounded-xl transition">Quick Pay</button>
                   </div>
               </div>
           ))}

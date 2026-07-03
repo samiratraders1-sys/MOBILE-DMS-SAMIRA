@@ -40,13 +40,16 @@ export interface Customer {
   id: string;
   name: string;
   companyId?: string;
-  contactDetails: {
+  phone?: string;
+  email?: string;
+  address?: string;
+  contactDetails?: {
     phone: string;
     email?: string;
     address?: string;
   };
   orderHistory: string[];
-  deliveryPreferences: {
+  deliveryPreferences?: {
     preferredTime?: string;
     deliveryInstructions?: string;
   };
@@ -55,13 +58,20 @@ export interface Customer {
 export interface Supplier {
   id: string;
   name: string;
+  company?: string;
+  mobile?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  paymentTerms?: string;
+  claimPolicy?: string;
   companyId?: string;
-  contactDetails: {
+  contactDetails?: {
     phone: string;
     email?: string;
     address?: string;
   };
-  productCatalog: {
+  productCatalog?: {
     productId: string;
     productName: string;
     currentPrice: number;
