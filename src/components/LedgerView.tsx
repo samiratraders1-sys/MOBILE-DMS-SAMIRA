@@ -27,12 +27,17 @@ import {
   X, 
   ExternalLink, 
   FileText, 
-  Loader2 
+  Loader2,
+  Eye,
+  RefreshCw,
+  AlertCircle
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { getGroupColors } from "../lib/utils";
 import { calculateRunningBalance, LedgerTransaction } from "../lib/ledgerEngine";
 import { calculateLedger } from "../utils/ledgerCalculator";
+import DailyClosingReportModal from "./DailyClosingReportModal";
+import HistoricalApprovalsModal from "./HistoricalApprovalsModal";
 
 // Format numbers in "Lakh" formatting (e.g., 2,70,836 Tk.)
 const showTk = (val: number) => {
@@ -49,12 +54,14 @@ interface LedgerProps {
   purchases: any[];
   sales?: any[];
   transactions?: any[];
+  routes?: any[];
   
   // Real DB actions injected from App.tsx
   addCustomer?: (item: any) => Promise<any>;
   updateCustomer?: (id: string, data: any) => Promise<any>;
   addSupplier?: (item: any) => Promise<any>;
   updateSupplier?: (id: string, data: any) => Promise<any>;
+  updateStaff?: (id: string, data: any) => Promise<any>;
   addPayment?: (item: any) => Promise<any>;
   addSale?: (item: any) => Promise<any>;
   updateProduct?: (id: string, data: any) => Promise<any>;
@@ -76,10 +83,12 @@ export default function LedgerView({
   purchases = [], 
   sales = [],
   transactions = [],
+  routes = [],
   addCustomer,
   updateCustomer,
   addSupplier,
   updateSupplier,
+  updateStaff,
   addPayment,
   addSale,
   updateProduct,
@@ -128,6 +137,17 @@ export default function LedgerView({
   const [payNote, setPayNote] = useState("");
   const [payDate, setPayDate] = useState(new Date().toISOString().split("T")[0]);
   const [paySupplierId, setPaySupplierId] = useState("all");
+
+  // Adjustment Form inputs
+  const [showAdjustmentModal, setShowAdjustmentModal] = useState(false);
+  const [adjustType, setAdjustType] = useState<"in" | "out">("in");
+  const [adjustAmount, setAdjustAmount] = useState("");
+  const [adjustNote, setAdjustNote] = useState("");
+  const [adjustDate, setAdjustDate] = useState(new Date().toISOString().split("T")[0]);
+
+  // Selected Closing Report state for touching staff ledger
+  const [selectedClosingReport, setSelectedClosingReport] = useState<any>(null);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
 
   // Direct Sale Form builder state
   const [saleItems, setSaleItems] = useState<any[]>([]); // { productId, qtyCartons, qtyPieces, rate, freeQty, name, cartonSize }
@@ -263,7 +283,7 @@ export default function LedgerView({
       sales.filter(s => s.customerId === partyId).forEach((s, idx) => {
         logs.push({
           date: s.date ? s.date.split("T")[0] : s.createdAt?.split("T")[0] || "N/A",
-          ref: `POS Bill #${s.id?.slice(-4).toUpperCase() || idx}`,
+          ref: `POS Bill #${s.id?.slice(-4)?.toUpperCase() || idx}`,
           type: "Debit",
           amount: Number(s.total || 0),
           description: `সরাসরি বিক্রয় (POS)`,
@@ -275,7 +295,7 @@ export default function LedgerView({
       payments.filter(p => p.entityId === partyId).forEach((p, idx) => {
         logs.push({
           date: p.date || p.createdAt?.split("T")[0] || "N/A",
-          ref: `Payment ${p.type === "in" ? "In" : "Out"} #${p.id?.slice(-4).toUpperCase() || idx}`,
+          ref: `Payment ${p.type === "in" ? "In" : "Out"} #${p.id?.slice(-4)?.toUpperCase() || idx}`,
           type: p.type === "in" ? "Credit" : "Debit",
           amount: Number(p.amount || 0),
           description: p.description || (p.type === "in" ? "টাকা গ্রহণ" : "টাকা পরিশোধ"),
@@ -289,7 +309,7 @@ export default function LedgerView({
       purchases.filter(p => p.supplierId === partyId).forEach((p, idx) => {
         logs.push({
           date: p.date || "N/A",
-          ref: `Purchase Invoice #${p.invoiceId || p.id?.slice(-4).toUpperCase() || idx}`,
+          ref: `Purchase Invoice #${p.invoiceId || p.id?.slice(-4)?.toUpperCase() || idx}`,
           type: "Credit",
           amount: Number(p.total || 0),
           description: `পণ্য ক্রয় ইনভয়েস`,
@@ -301,7 +321,7 @@ export default function LedgerView({
       payments.filter(p => p.entityId === partyId).forEach((p, idx) => {
         logs.push({
           date: p.date || p.createdAt?.split("T")[0] || "N/A",
-          ref: `Payment ${p.type === "in" ? "In" : "Out"} #${p.id?.slice(-4).toUpperCase() || idx}`,
+          ref: `Payment ${p.type === "in" ? "In" : "Out"} #${p.id?.slice(-4)?.toUpperCase() || idx}`,
           type: p.type === "in" ? "Credit" : "Debit",
           amount: Number(p.amount || 0),
           description: p.description || (p.type === "in" ? "সাপ্লায়ার রিফান্ড" : "সাপ্লায়ার বিল পরিশোধ"),
@@ -405,7 +425,7 @@ export default function LedgerView({
       return {
         id: item.id,
         date: item.date,
-        ref: item.refId ? `রসিদ #${item.refId.slice(-4).toUpperCase()}` : "লেনদেন",
+        ref: (item.refId && typeof item.refId === "string") ? `রসিদ #${item.refId.slice(-4).toUpperCase()}` : "লেনদেন",
         type: isDebit ? "Debit" : "Credit",
         amount: item.amount,
         description: item.description,
@@ -538,6 +558,9 @@ export default function LedgerView({
       } else if (selectedPartyObj.type === "supplier" && updateSupplier) {
         const newBal = (Number(selectedPartyObj.raw.balance) || 0) + amount;
         await updateSupplier(selectedPartyObj.id, { balance: newBal });
+      } else if (selectedPartyObj.type === "staff" && updateStaff) {
+        const newBal = (Number(selectedPartyObj.raw.balance) || 0) + amount;
+        await updateStaff(selectedPartyObj.id, { balance: newBal });
       }
 
       toast.success("পেমেন্ট-ইন (টাকা জমা) সফলভাবে সম্পন্ন হয়েছে!");
@@ -591,6 +614,9 @@ export default function LedgerView({
       } else if (selectedPartyObj.type === "customer" && updateCustomer) {
         const newBal = (Number(selectedPartyObj.raw.balance) || 0) + amount;
         await updateCustomer(selectedPartyObj.id, { balance: newBal });
+      } else if (selectedPartyObj.type === "staff" && updateStaff) {
+        const newBal = (Number(selectedPartyObj.raw.balance) || 0) - amount;
+        await updateStaff(selectedPartyObj.id, { balance: newBal });
       }
 
       toast.success("পেমেন্ট-আউট (টাকা পরিশোধ) সফল হয়েছে!");
@@ -599,6 +625,72 @@ export default function LedgerView({
       setShowPaymentOutModal(false);
     } catch (e: any) {
       toast.error("পেমেন্ট সেভ করতে ত্রুটি: " + e.message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // 3b. HANDLER FOR LEDGER ADJUSTMENT (লেজার সমন্বয়)
+  const handleSaveAdjustment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const amount = Number(adjustAmount);
+    if (!selectedPartyObj || !amount || amount <= 0) {
+      toast.error("অনুগ্রহ করে সঠিক টাকার পরিমাণ দিন!");
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const isTypeIn = adjustType === "in";
+      const adjustmentRecord = {
+        date: adjustDate,
+        type: adjustType, // "in" or "out"
+        amount: amount,
+        category: "Ledger Adjustment",
+        description: adjustNote.trim() || `লেজার সমন্বয়: ${isTypeIn ? 'টাকা সমন্বয় (In)' : 'টাকা সমন্বয় (Out)'}`,
+        entityId: selectedPartyObj.id,
+        supplierId: selectedPartyObj.type === "customer" ? paySupplierId : selectedPartyObj.id,
+        method: "Adjustment",
+        accountId: "cash",
+        status: "approved",
+        approved: true,
+        createdBy: user?.email || "Manager",
+        createdAt: new Date().toISOString()
+      };
+
+      if (addPayment) {
+        await addPayment(adjustmentRecord);
+      } else {
+        throw new Error("addPayment callback missing");
+      }
+
+      // Update local party schema balance based on type and sign
+      if (selectedPartyObj.type === "customer") {
+        const change = isTypeIn ? -amount : amount;
+        if (updateCustomer) {
+          const newBal = (Number(selectedPartyObj.raw.balance) || 0) + change;
+          await updateCustomer(selectedPartyObj.id, { balance: newBal });
+        }
+      } else if (selectedPartyObj.type === "supplier") {
+        const change = isTypeIn ? amount : -amount;
+        if (updateSupplier) {
+          const newBal = (Number(selectedPartyObj.raw.balance) || 0) + change;
+          await updateSupplier(selectedPartyObj.id, { balance: newBal });
+        }
+      } else if (selectedPartyObj.type === "staff") {
+        const change = isTypeIn ? amount : -amount;
+        if (updateStaff) {
+          const newBal = (Number(selectedPartyObj.raw.balance) || 0) + change;
+          await updateStaff(selectedPartyObj.id, { balance: newBal });
+        }
+      }
+
+      toast.success("লেজার সমন্বয় সফলভাবে সম্পন্ন হয়েছে!");
+      setAdjustAmount("");
+      setAdjustNote("");
+      setShowAdjustmentModal(false);
+    } catch (e: any) {
+      toast.error("সমন্বয় সেভ করতে ত্রুটি: " + e.message);
     } finally {
       setIsSubmitting(false);
     }
@@ -1390,6 +1482,15 @@ export default function LedgerView({
                   <FileText className="w-3.5 h-3.5 text-slate-450" /> হিসাব খতিয়ান রিপোর্ট
                 </button>
 
+                {(selectedPartyObj?.type === "customer" || selectedPartyObj?.type === "staff") && (
+                  <button 
+                    onClick={() => setShowHistoryModal(true)}
+                    className="flex items-center gap-1.5 px-3 py-1 bg-indigo-50 border border-indigo-200 rounded-full text-xs font-bold text-indigo-700 shadow-xs hover:bg-indigo-100 cursor-pointer animate-all duration-200"
+                  >
+                    <Eye className="w-3.5 h-3.5" /> অনুমোদন ইতিহাস (View History)
+                  </button>
+                )}
+
                 {selectedPartyObj?.type === "customer" && selectedPartyObj.computedBalance > 0 && (
                   <button 
                     onClick={() => setShowQuickPayConfirm(true)}
@@ -1496,10 +1597,15 @@ export default function LedgerView({
             <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
               {selectedPartyLedgerLogs.map((log, idx) => {
                 const isDebitVal = log.type === "Debit";
+                const matchingSummary = selectedPartyObj?.type === "staff" 
+                  ? summaries.find(s => s.dsrId === selectedPartyObj.id && (s.settlementDate === log.date || s.date === log.date || s.id === log.refId))
+                  : null;
+
                 return (
                   <div
                     key={log.id + "_" + idx}
-                    className="flex justify-between items-center p-4 bg-slate-50 hover:bg-slate-100/50 rounded-2xl border border-slate-100 transition-all"
+                    onClick={() => matchingSummary && setSelectedClosingReport(matchingSummary)}
+                    className={`flex justify-between items-center p-4 bg-slate-50 hover:bg-slate-100/50 rounded-2xl border border-slate-100 transition-all ${matchingSummary ? 'cursor-pointer hover:border-indigo-300 hover:bg-indigo-50/20' : ''}`}
                   >
                     <div className="space-y-1">
                       <p className="font-bold text-[#1e1b4b] text-xs flex items-center gap-2">
@@ -1509,9 +1615,16 @@ export default function LedgerView({
                       <p className="text-[10px] text-gray-400 font-bold select-none">{log.description}</p>
                       
                       {/* Accumulator running outstanding tag - Matches the Balance Pill in Image 2 */}
-                      <span className="inline-block mt-1 px-2.5 py-0.5 bg-emerald-50 text-emerald-700 rounded-full font-black text-[9px] tracking-tight">
-                        Bal: {showTk(log.runningBalance)}
-                      </span>
+                      <div className="flex flex-wrap items-center gap-2 mt-1">
+                        <span className="inline-block px-2.5 py-0.5 bg-emerald-50 text-emerald-700 rounded-full font-black text-[9px] tracking-tight">
+                          Bal: {showTk(log.runningBalance)}
+                        </span>
+                        {matchingSummary && (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-indigo-50 text-indigo-700 rounded-full font-black text-[9px] tracking-tight">
+                            <Eye className="w-2.5 h-2.5" /> ক্লোজিং রিপোর্ট দেখুন
+                          </span>
+                        )}
+                      </div>
                     </div>
 
                     {/* Transaction Amount - green/red colored */}
@@ -1533,12 +1646,12 @@ export default function LedgerView({
             </div>
           </div>
 
-          {/* Bottom Floating Sticky Control Board - Replication of Image 2 buttons with custom Sales added */}
-          <div className="bg-white rounded-3xl p-5 border border-gray-150 shadow-lg grid grid-cols-3 gap-3.5 no-print sticky bottom-4 z-40">
+          {/* Bottom Floating Sticky Control Board - Replication of Image 2 buttons with custom Sales & Adjustment added */}
+          <div className="bg-white rounded-3xl p-5 border border-gray-150 shadow-lg grid grid-cols-2 lg:grid-cols-4 gap-3 no-print sticky bottom-4 z-40">
             {/* GREEN BUTTON: PAYMENT IN */}
             <button
               onClick={() => setShowPaymentInModal(true)}
-              className="py-3 px-4 bg-emerald-600 hover:bg-emerald-750 text-white rounded-2xl font-black text-xs md:text-sm flex items-center justify-center gap-1.5 shadow-md hover:scale-[1.02] active:scale-95 transition-all cursor-pointer"
+              className="py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-black text-xs flex items-center justify-center gap-1.5 shadow-md hover:scale-[1.02] active:scale-95 transition-all cursor-pointer"
             >
               <ArrowDownLeft className="w-4 h-4 shrink-0" /> টাকা জমা (Payment In)
             </button>
@@ -1546,9 +1659,17 @@ export default function LedgerView({
             {/* RED BUTTON: PAYMENT OUT */}
             <button
               onClick={() => setShowPaymentOutModal(true)}
-              className="py-3 px-4 bg-red-600 hover:bg-red-700 text-white rounded-2xl font-black text-xs md:text-sm flex items-center justify-center gap-1.5 shadow-md hover:scale-[1.02] active:scale-95 transition-all cursor-pointer"
+              className="py-3 px-4 bg-red-600 hover:bg-red-700 text-white rounded-2xl font-black text-xs flex items-center justify-center gap-1.5 shadow-md hover:scale-[1.02] active:scale-95 transition-all cursor-pointer"
             >
               <ArrowUpRight className="w-4 h-4 shrink-0" /> টাকা খরচ (Payment Out)
+            </button>
+
+            {/* AMBER BUTTON: LEDGER ADJUSTMENT */}
+            <button
+              onClick={() => setShowAdjustmentModal(true)}
+              className="py-3 px-4 bg-amber-500 hover:bg-amber-600 text-white rounded-2xl font-black text-xs flex items-center justify-center gap-1.5 shadow-md hover:scale-[1.02] active:scale-95 transition-all cursor-pointer"
+            >
+              <RefreshCw className="w-4 h-4 shrink-0" /> লেজার সমন্বয় (Adjustment)
             </button>
 
             {/* INTERACTIVE BLUE/INDIGO DIRECT SALE BUTTON */}
@@ -1561,7 +1682,7 @@ export default function LedgerView({
                 }
               }}
               disabled={selectedPartyObj?.type !== "customer"}
-              className="py-3 px-4 bg-indigo-600 hover:bg-indigo-750 text-white rounded-2xl font-black text-xs md:text-sm flex items-center justify-center gap-1.5 shadow-md hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+              className="py-3 px-4 bg-indigo-600 hover:bg-indigo-750 text-white rounded-2xl font-black text-xs flex items-center justify-center gap-1.5 shadow-md hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
             >
               <ShoppingCart className="w-4 h-4 shrink-0" /> সরাসরি বিক্রয় (POS Sale)
             </button>
@@ -2195,6 +2316,140 @@ export default function LedgerView({
           </div>
         </div>
       )}
+
+      {/* ──────────────────────────────────────────────────────── */}
+      {/* 6. POPUP MODAL: LEDGER ADJUSTMENT                         */}
+      {/* ──────────────────────────────────────────────────────── */}
+      {showAdjustmentModal && selectedPartyObj && (
+        <div className="fixed inset-0 z-50 overflow-y-auto flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs select-none">
+          <div className="bg-white rounded-3xl border shadow-2xl w-full max-w-md overflow-hidden relative">
+            <div className="p-6 border-b flex justify-between items-center bg-amber-50">
+              <div>
+                <h3 className="font-extrabold text-amber-950 text-md">লেজার সমন্বয় করুন (Ledger Adjustment)</h3>
+                <p className="text-[9px] text-amber-700 font-bold uppercase mt-0.5">ম্যানুয়াল ব্যালেন্স ডেবিট/ক্রেডিট সমন্বয়</p>
+              </div>
+              <button 
+                onClick={() => setShowAdjustmentModal(false)}
+                className="p-1.5 hover:bg-amber-100 text-amber-800 rounded-xl transition-all cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveAdjustment} className="p-6 space-y-4">
+              <div className="bg-slate-50 p-3 rounded-xl border text-center space-y-0.5">
+                <p className="text-[10px] text-gray-400 font-bold uppercase font-black">পার্টি নাম ({selectedPartyObj.type.toUpperCase()})</p>
+                <p className="font-black text-slate-800 text-sm">{selectedPartyObj.name}</p>
+                <p className="text-[11px] text-[#64748b] font-black">বর্তমান বকেয়া: {showTk(selectedPartyObj.computedBalance)}</p>
+              </div>
+
+              {/* Adjustment Type Selection */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-gray-400 block uppercase">সমন্বয়ের ধরণ (Adjustment Type)</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setAdjustType("in")}
+                    className={`py-2 px-3 text-xs font-bold rounded-xl border text-center transition-all ${adjustType === "in" ? "bg-emerald-50 text-emerald-700 border-emerald-300 shadow-xs font-black" : "bg-white text-gray-500 border-gray-200"}`}
+                  >
+                    {selectedPartyObj.type === "customer" ? "বকেয়া কমানো (Decrease)" : "ব্যালেন্স বাড়ানো (Increase)"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAdjustType("out")}
+                    className={`py-2 px-3 text-xs font-bold rounded-xl border text-center transition-all ${adjustType === "out" ? "bg-red-50 text-red-700 border-red-300 shadow-xs font-black" : "bg-white text-gray-500 border-gray-200"}`}
+                  >
+                    {selectedPartyObj.type === "customer" ? "বকেয়া বাড়ানো (Increase)" : "ব্যালেন্স কমানো (Decrease)"}
+                  </button>
+                </div>
+              </div>
+
+              {/* Amount field */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-gray-400 block uppercase">টাকার পরিমাণ (Taka Amount)</label>
+                <input
+                  type="number"
+                  required
+                  placeholder="যেমন: ৫০০"
+                  value={adjustAmount}
+                  onChange={e => setAdjustAmount(e.target.value)}
+                  className="w-full text-xs font-bold p-2.5 border border-gray-250 rounded-xl"
+                />
+              </div>
+
+              {/* Date field */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-gray-400 block uppercase">তারিখ (Date)</label>
+                <input
+                  type="date"
+                  required
+                  value={adjustDate}
+                  onChange={e => setAdjustDate(e.target.value)}
+                  className="w-full text-xs p-2.5 border border-gray-250 rounded-xl font-bold"
+                />
+              </div>
+
+              {/* Description/Note field */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-gray-400 block uppercase">সমন্বয়ের বিবরণ (Adjustment Note)</label>
+                <input
+                  type="text"
+                  placeholder="যেমন: স্যালারি শর্ট ব্যালেন্স সমন্বয় / গিফট ডিসকাউন্ট"
+                  value={adjustNote}
+                  onChange={e => setAdjustNote(e.target.value)}
+                  className="w-full text-xs p-2.5 border border-gray-250 rounded-xl font-bold"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAdjustmentModal(false)}
+                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold cursor-pointer transition-all animate-all"
+                >
+                  বাতিল
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="flex-1 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5 cursor-pointer transition-all shadow-md"
+                >
+                  {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                  সমন্বয় সেভ করুন
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────── */}
+      {/* 7. DSR DAILY CLOSING REPORT DETAILS POPUP                  */}
+      {/* ──────────────────────────────────────────────────────── */}
+      <DailyClosingReportModal
+        isOpen={!!selectedClosingReport}
+        onClose={() => setSelectedClosingReport(null)}
+        summary={selectedClosingReport}
+        products={products}
+        staff={staff}
+        routes={routes}
+        customers={customers}
+        suppliers={suppliers}
+      />
+
+      <HistoricalApprovalsModal
+        isOpen={showHistoryModal}
+        onClose={() => setShowHistoryModal(false)}
+        entityId={selectedPartyObj?.id}
+        entityType={selectedPartyObj?.type}
+        sales={sales}
+        summaries={summaries}
+        payments={payments}
+        customers={customers}
+        staff={staff}
+        suppliers={suppliers}
+        routes={routes}
+      />
 
     </div>
   );

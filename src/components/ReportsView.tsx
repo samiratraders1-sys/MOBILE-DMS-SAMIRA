@@ -1,9 +1,12 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell, PieChart, Pie } from 'recharts';
 import { FileSearch, Calendar, Download, TrendingUp, AlertTriangle, Gift, ShoppingCart, ArrowRight, Printer, Share2, FileText, Check, DollarSign } from "lucide-react";
 import { formatCurrency } from "../lib/utils";
 import { toFloat } from "../lib/math";
 import CustomerGroupReportsView from "./CustomerGroupReportsView";
+import ProfitLossView from "./ProfitLossView";
+import DailyCashBookView from "./DailyCashBookView";
+import PaymentHistoryView from "./PaymentHistoryView";
 
 const CHART_COLORS = [
   "#4F46E5", // Indigo
@@ -20,13 +23,20 @@ interface ReportsViewProps {
   summaries: any[];
   products: any[];
   suppliers: any[];
-  addPayment: (payment: any) => void;
+  addPayment: (payment: any) => any;
   staff?: any[];
   sales?: any[];
   purchases?: any[];
   payments?: any[];
   customers?: any[];
   customerGroups?: any[];
+  accounts?: any[];
+  transfers?: any[];
+  subDbShipments?: any[];
+  removePayment?: (id: string) => Promise<void>;
+  role?: string;
+  user?: any;
+  initialTab?: "sales" | "damage" | "free" | "discount" | "sr-daily" | "monthly-review" | "customer-groups" | "valuation" | "pnl" | "daily-cash-book" | "payment-history";
 }
 
 export default function ReportsView({ 
@@ -39,17 +49,130 @@ export default function ReportsView({
   purchases = [],
   payments = [],
   customers = [],
-  customerGroups = []
+  customerGroups = [],
+  accounts = [],
+  transfers = [],
+  subDbShipments = [],
+  removePayment = async () => {},
+  role = "admin",
+  user = null,
+  initialTab = "sales"
 }: ReportsViewProps) {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [selectedSupplier, setSelectedSupplier] = useState<string>("");
   const [selectedDetail, setSelectedDetail] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState<"sales" | "damage" | "free" | "discount" | "sr-daily" | "monthly-review" | "customer-groups">("sales");
+  const [activeTab, setActiveTab] = useState<"sales" | "damage" | "free" | "discount" | "sr-daily" | "monthly-review" | "customer-groups" | "valuation" | "pnl" | "daily-cash-book" | "payment-history">(initialTab);
+
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
 
   // New states for SR Daily free & sales splitting
   const [selectedSR, setSelectedSR] = useState("");
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [selectedValuationDate, setSelectedValuationDate] = useState(() => "2026-06-07"); // Default anchor date or today
+
+  // Memoized Inventory Valuation Data Calculation
+  const valuationData = useMemo(() => {
+    const selectedDateStr = selectedValuationDate;
+    
+    // 1. Initialize maps
+    const prodSalesVal: Record<string, number> = {};
+    const prodDamageVal: Record<string, number> = {};
+    const prodSalesQty: Record<string, number> = {};
+    const prodDamageQty: Record<string, number> = {};
+
+    // A) Process POS Sales
+    (sales || []).forEach(sale => {
+      if (!sale || typeof sale !== 'object' || !sale.date || typeof sale.date !== 'string') return;
+      if (!sale.date.startsWith(selectedDateStr)) return;
+      if (sale.status === "rejected" || sale.approved === false) return;
+
+      const items = sale.items || [];
+      items.forEach((item: any) => {
+        if (!item || typeof item !== 'object') return;
+        const qty = Number(item.qty || item.quantity || 0);
+        const price = Number(item.price || 0);
+        const pId = item.id || item.productId;
+        if (pId) {
+          prodSalesQty[pId] = (prodSalesQty[pId] || 0) + qty;
+          prodSalesVal[pId] = (prodSalesVal[pId] || 0) + (qty * price);
+        }
+      });
+    });
+
+    // B) Process Route Delivery Summaries (Settled)
+    (summaries || []).forEach(s => {
+      if (!s || typeof s !== 'object' || s.status !== "settled" || s.approved === false) return;
+      const sDate = s.settlementDate || s.date;
+      if (!sDate || !sDate.startsWith(selectedDateStr)) return;
+
+      // Sales Items
+      const items = s.items || [];
+      items.forEach((item: any) => {
+        if (!item || typeof item !== 'object') return;
+        const totalSold = Math.max(0, Number(item.soldQty !== undefined ? item.soldQty : (item.totalPieces - (item.returns || 0))));
+        const sellPrice = Number(item.price || 0);
+        const pId = item.productId;
+        if (pId) {
+          prodSalesQty[pId] = (prodSalesQty[pId] || 0) + totalSold;
+          prodSalesVal[pId] = (prodSalesVal[pId] || 0) + (totalSold * sellPrice);
+        }
+      });
+
+      // Damage Items
+      const dItems = s.damageItems || [];
+      dItems.forEach((d: any) => {
+        if (!d || typeof d !== 'object') return;
+        const qty = Number(d.quantity || 0);
+        const price = Number(d.price || d.sellPrice || 0);
+        const pId = d.productId;
+        if (pId) {
+          prodDamageQty[pId] = (prodDamageQty[pId] || 0) + qty;
+          prodDamageVal[pId] = (prodDamageVal[pId] || 0) + (qty * price);
+        }
+      });
+    });
+
+    let totalSalesSum = 0;
+    let totalDamageSum = 0;
+
+    const itemsList = (products || []).map(p => {
+      const salesQty = prodSalesQty[p.id] || 0;
+      const salesVal = prodSalesVal[p.id] || 0;
+      const damageQty = prodDamageQty[p.id] || 0;
+      const damageVal = prodDamageVal[p.id] || 0;
+      const closingVal = salesVal + damageVal;
+
+      totalSalesSum += salesVal;
+      totalDamageSum += damageVal;
+
+      return {
+        id: p.id,
+        name: p.name,
+        sku: p.sku || "N/A",
+        price: p.price || 0,
+        stock: p.stock || 0,
+        salesQty,
+        salesVal,
+        damageQty,
+        damageVal,
+        closingVal
+      };
+    }).filter(item => item.salesQty > 0 || item.damageQty > 0 || item.stock > 0);
+
+    const totalClosingSum = totalSalesSum + totalDamageSum;
+
+    return {
+      itemsList,
+      totalSalesSum,
+      totalDamageSum,
+      totalClosingSum
+    };
+  }, [sales, summaries, products, selectedValuationDate]);
 
   // Monthly financial review states & calculations
   const [selectedMonth, setSelectedMonth] = useState(() => {
@@ -966,18 +1089,148 @@ export default function ReportsView({
       </div>
 
        <div className="flex gap-2 overflow-x-auto pb-2">
-            {(['sales', 'damage', 'free', 'discount', 'sr-daily', 'monthly-review', 'customer-groups'] as const).map(tab => (
+            {(['sales', 'damage', 'free', 'discount', 'sr-daily', 'customer-groups', 'valuation', 'monthly-review', 'pnl', 'daily-cash-book', 'payment-history'] as const).map(tab => (
                 <button 
                   key={tab}
                   onClick={() => setActiveTab(tab)}
                   className={`px-6 py-2 rounded-xl font-bold text-sm whitespace-nowrap transition-all ${activeTab === tab ? 'bg-indigo-600 text-white' : 'bg-white border text-gray-600'}`}
                 >
-                    {tab === 'sales' ? 'বিক্রয়' : tab === 'damage' ? 'ড্যামেজ' : tab === 'free' ? 'ফ্রি/গিফট' : tab === 'discount' ? 'ডিসকাউন্ট' : tab === 'sr-daily' ? 'এসআর ডেইলি ফ্রি ও সেলস' : tab === 'customer-groups' ? 'কাস্টমার গ্রুপ রিপোর্ট' : 'মাসিক আর্থিক পর্যালোচনা'}
+                    {tab === 'sales' ? 'বিক্রয়' : tab === 'damage' ? 'ড্যামেজ' : tab === 'free' ? 'ফ্রি/গিফট' : tab === 'discount' ? 'ডিসকাউন্ট' : tab === 'sr-daily' ? 'এসআর ডেইলি ফ্রি ও সেলস' : tab === 'customer-groups' ? 'কাস্টমার গ্রুপ রিপোর্ট' : tab === 'valuation' ? 'ইনভেন্টরি ভ্যালুয়েশন' : tab === 'pnl' ? 'লাভ-ক্ষতি রিপোর্ট' : tab === 'daily-cash-book' ? 'দৈনিক ক্যাশ বুক' : tab === 'payment-history' ? 'পেমেন্ট লেনদেন খতিয়ান' : 'মাসিক আর্থিক পর্যালোচনা'}
                 </button>
             ))}
        </div>
 
-        {activeTab === 'customer-groups' ? (
+        {activeTab === 'valuation' ? (
+          <div className="space-y-6 animate-in fade-in duration-300 font-sans">
+            {/* Header and Control Bar */}
+            <div className="bg-white p-6 rounded-3xl border shadow-xs flex flex-col sm:flex-row justify-between items-center gap-4">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-emerald-50 text-emerald-600 rounded-2xl">
+                  <TrendingUp className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-slate-950 text-md">মজুদ মূল্যায়ন ও অবসান রিপোর্ট (Inventory Valuation Report)</h3>
+                  <p className="text-xs text-slate-500 font-bold mt-0.5">Closing Sales Value = (Today's Sales Value) + (Today's Damage Value)</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 bg-slate-50 border p-1 px-3 rounded-2xl shadow-inner">
+                <span className="text-xs text-gray-500 font-bold">তারিখ নির্বাচন:</span>
+                <input
+                  type="date"
+                  className="border-0 bg-transparent text-sm font-black text-slate-850 focus:ring-0 cursor-pointer outline-none border-b-2 border-dashed border-emerald-300"
+                  value={selectedValuationDate}
+                  onChange={(e) => setSelectedValuationDate(e.target.value)}
+                />
+              </div>
+            </div>
+
+            {/* Summary Bento Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+              {/* Sales Value Box */}
+              <div className="bg-white p-5 rounded-3xl border shadow-xs flex flex-col justify-between">
+                <p className="text-[10px] text-gray-400 font-black uppercase tracking-wider">আজকের সর্বমোট বিক্রয়মূল্য (Today's Sales Value)</p>
+                <div className="flex justify-between items-baseline mt-4">
+                  <span className="text-2xl font-black text-slate-900">{formatCurrency(valuationData.totalSalesSum)}</span>
+                  <span className="text-xs text-emerald-600 font-extrabold bg-emerald-50 px-2.5 py-1 rounded-full">চলতি হিসাব</span>
+                </div>
+              </div>
+
+              {/* Damage Return Value Box */}
+              <div className="bg-white p-5 rounded-3xl border shadow-xs flex flex-col justify-between">
+                <p className="text-[10px] text-gray-400 font-black uppercase tracking-wider">আজকের নষ্ট/ড্যামেজ রিটার্ন মূল্য (Today's Damage Value)</p>
+                <div className="flex justify-between items-baseline mt-4">
+                  <span className="text-2xl font-black text-rose-600">{formatCurrency(valuationData.totalDamageSum)}</span>
+                  <span className="text-xs text-rose-600 font-extrabold bg-rose-50 px-2.5 py-1 rounded-full">ড্যামেজ স্টক</span>
+                </div>
+              </div>
+
+              {/* Closing Inventory Sales Value Box */}
+              <div className="bg-gradient-to-br from-emerald-500 to-emerald-600 p-5 rounded-3xl text-white shadow-md flex flex-col justify-between">
+                <p className="text-[10px] text-emerald-100 font-black uppercase tracking-wider">ইনভেন্টরি অবসান বিক্রয় মূল্য (Closing Valuation)</p>
+                <div className="flex justify-between items-baseline mt-4">
+                  <span className="text-3xl font-black">{formatCurrency(valuationData.totalClosingSum)}</span>
+                  <span className="text-xs text-white font-extrabold bg-emerald-700/40 px-2.5 py-1 rounded-full">ফলাফল</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Accounting Note */}
+            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-xs text-amber-850 font-medium leading-relaxed font-sans">
+              ⚠️ <strong>হিসাবরক্ষণ তথ্য:</strong> সংশ্লিষ্ট নষ্ট ও ড্যামেজ হওয়া পণ্যগুলো মূল হিসাবের নিরাপত্তা রক্ষায় সম্পূর্ণ আলাদা রেজিস্টারে ট্র্যাকিং করা হচ্ছে। এগুলো সরাসরি ব্যবসার প্রধান লাভ-ক্ষতি (Profit & Loss / P&L) বিবরণীকে প্রভাবিত করে না।
+            </div>
+
+            {/* Valuation Breakdown Table */}
+            <div className="bg-white rounded-3xl border shadow-xs overflow-hidden">
+              <div className="p-5 border-b flex justify-between items-center bg-gray-50">
+                <h4 className="font-extrabold text-slate-900 text-sm">পণ্যভিত্তিক অবসান মূল্যায়ন বিবরণী ({valuationData.itemsList.length} টি আইটেম)</h4>
+                <button
+                  onClick={() => {
+                    const headers = ["পণ্যের নাম (Product Name)", "SKU", "রেট (Price)", "বিক্রয় সংখ্যা (Sales Qty)", "বিক্রয় মূল্য (Sales Value)", "ড্যামেজ সংখ্যা (Damage Qty)", "ড্যামেজ মূল্য (Damage Value)", "অবসান মূল্যায়ন (Closing Valuation)"];
+                    const rows = valuationData.itemsList.map(item => [
+                      item.name,
+                      item.sku,
+                      item.price,
+                      item.salesQty,
+                      item.salesVal,
+                      item.damageQty,
+                      item.damageVal,
+                      item.closingVal
+                    ]);
+                    const csvContent = "data:text/csv;charset=utf-8,\uFEFF" + [headers, ...rows].map(e => e.map(val => `"${val}"`).join(",")).join("\n");
+                    const encodedUri = encodeURI(csvContent);
+                    const link = document.createElement("a");
+                    link.setAttribute("href", encodedUri);
+                    link.setAttribute("download", `inventory_valuation_report_${selectedValuationDate}.csv`);
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                  }}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer"
+                >
+                  <Download className="w-4 h-4" /> এক্সেল রপ্তানি (Export CSV)
+                </button>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead className="bg-[#F8F9FA] text-[10px] uppercase font-bold text-[#ADB5BD] border-b">
+                    <tr>
+                      <th className="px-6 py-4">পণ্যের নাম</th>
+                      <th className="px-6 py-4 text-center">SKU</th>
+                      <th className="px-6 py-4 text-right">বিক্রয় রেট</th>
+                      <th className="px-6 py-4 text-center">বিক্রয় (পিস্)</th>
+                      <th className="px-6 py-4 text-right">বিক্রয় মূল্য</th>
+                      <th className="px-6 py-4 text-center text-rose-600">ড্যামেজ (পিস্)</th>
+                      <th className="px-6 py-4 text-right text-rose-600">ড্যামেজ মূল্য</th>
+                      <th className="px-6 py-4 text-right font-black text-emerald-700">অবসান বিক্রয়মূল্য (Closing)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y text-xs text-[#212529] font-bold">
+                    {valuationData.itemsList.length === 0 ? (
+                      <tr>
+                        <td colSpan={8} className="px-6 py-12 text-center text-gray-400 font-semibold leading-relaxed">
+                          এই তারিখে কোনো বিক্রয় বা ড্যামেজ ফেরতের হিসাব পাওয়া যায়নি।
+                        </td>
+                      </tr>
+                    ) : (
+                      valuationData.itemsList.map((item, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                           <td className="px-6 py-4 font-extrabold text-gray-900">{item.name}</td>
+                           <td className="px-6 py-4 text-center font-mono text-gray-400 text-[10px]">{item.sku}</td>
+                           <td className="px-6 py-4 text-right font-mono">{formatCurrency(item.price)}</td>
+                           <td className="px-6 py-4 text-center font-mono">{item.salesQty}</td>
+                           <td className="px-6 py-4 text-right font-mono text-slate-800">{formatCurrency(item.salesVal)}</td>
+                           <td className="px-6 py-4 text-center font-mono text-rose-550">{item.damageQty}</td>
+                           <td className="px-6 py-4 text-right font-mono text-rose-600">{formatCurrency(item.damageVal)}</td>
+                           <td className="px-6 py-4 text-right font-mono font-black text-emerald-600 bg-emerald-50/30">{formatCurrency(item.closingVal)}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        ) : activeTab === 'customer-groups' ? (
           <CustomerGroupReportsView customers={customers} customerGroups={customerGroups} sales={sales} />
         ) : activeTab === 'monthly-review' ? (
           <div className="space-y-6 animate-in fade-in duration-300">
@@ -1230,7 +1483,40 @@ export default function ReportsView({
               </div>
             </div>
           </div>
-        ) : activeTab !== 'sr-daily' ? (
+        ) : activeTab === 'pnl' ? (
+          <ProfitLossView 
+             sales={sales}
+             purchases={purchases}
+             payments={payments}
+             summaries={summaries}
+             products={products}
+             subDbShipments={subDbShipments}
+          />
+        ) : activeTab === 'daily-cash-book' ? (
+          <DailyCashBookView
+            accounts={accounts}
+            payments={payments}
+            transfers={transfers}
+            summaries={summaries}
+            customers={customers}
+            suppliers={suppliers}
+            staff={staff}
+            role={role}
+            user={user}
+          />
+        ) : activeTab === 'payment-history' ? (
+          <PaymentHistoryView
+            payments={payments}
+            customers={customers}
+            suppliers={suppliers}
+            staff={staff}
+            accounts={accounts}
+            removePayment={removePayment}
+            addPayment={addPayment}
+            role={role}
+            user={user}
+          />
+        ) : (activeTab === 'sales' || activeTab === 'damage' || activeTab === 'free' || activeTab === 'discount') ? (
           <div className="bg-white rounded-3xl border shadow-sm overflow-x-auto animate-in fade-in duration-350">
             <table className="w-full text-left border-collapse">
              <thead className="bg-[#F8F9FA] text-[10px] uppercase font-bold text-[#ADB5BD]">

@@ -79,7 +79,19 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       return;
     }
 
+    let unsubscribeCompany: (() => void) | null = null;
+    let unsubscribeLicense: (() => void) | null = null;
+    let unsubscribeSub: (() => void) | null = null;
+
+    const cleanUpSubscriptions = () => {
+      if (unsubscribeCompany) { unsubscribeCompany(); unsubscribeCompany = null; }
+      if (unsubscribeLicense) { unsubscribeLicense(); unsubscribeLicense = null; }
+      if (unsubscribeSub) { unsubscribeSub(); unsubscribeSub = null; }
+    };
+
     const unsubscribeAuth = auth.onAuthStateChanged(async (user) => {
+      cleanUpSubscriptions();
+
       if (!user) {
         setCompany(null);
         setLicense(null);
@@ -198,7 +210,7 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
       // 1. Listen to active Company details
       const companyRef = doc(db, 'companies', currentCompanyId);
-      const unsubscribeCompany = onSnapshot(companyRef, (docSnap) => {
+      unsubscribeCompany = onSnapshot(companyRef, (docSnap) => {
         if (docSnap.exists()) {
           setCompany({ id: docSnap.id, ...docSnap.data() } as Company);
         } else {
@@ -211,7 +223,7 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       // 2. Listen to active Company License details
       const licensesRef = collection(db, 'licenses');
       const licenseQuery = query(licensesRef, where('companyId', '==', currentCompanyId));
-      const unsubscribeLicense = onSnapshot(licenseQuery, (snap) => {
+      unsubscribeLicense = onSnapshot(licenseQuery, (snap) => {
         if (!snap.empty) {
           const lDoc = snap.docs[0];
           setLicense({ id: lDoc.id, ...lDoc.data() });
@@ -225,7 +237,7 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       // 3. Listen to active Company Subscription details
       const subscriptionsRef = collection(db, 'subscriptions');
       const subQuery = query(subscriptionsRef, where('companyId', '==', currentCompanyId));
-      const unsubscribeSub = onSnapshot(subQuery, (snap) => {
+      unsubscribeSub = onSnapshot(subQuery, (snap) => {
         if (!snap.empty) {
           const sDoc = snap.docs[0];
           setSubscription({ id: sDoc.id, ...sDoc.data() });
@@ -237,15 +249,12 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
         console.error("Error subscribing to subscription:", err);
         setLoadingCompany(false);
       });
-
-      return () => {
-        unsubscribeCompany();
-        unsubscribeLicense();
-        unsubscribeSub();
-      };
     });
 
-    return () => unsubscribeAuth();
+    return () => {
+      cleanUpSubscriptions();
+      unsubscribeAuth();
+    };
   }, [companyId, authStateCounter]);
 
   // Determine read-only mode:

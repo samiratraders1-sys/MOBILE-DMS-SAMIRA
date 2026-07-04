@@ -6,6 +6,7 @@ import { formatCurrency } from "../lib/utils";
 import { useFormAutoSave } from "../hooks/useFormAutoSave";
 import { useConfirm } from "../context/ConfirmContext";
 import toast from "react-hot-toast";
+import ThermalPrintTemplate from "./ThermalPrintTemplate";
 
 interface POSProps {
   products: any[];
@@ -94,6 +95,7 @@ export default function PointOfSaleView({
   const [activeReceipt, setActiveReceipt] = useState<any | null>(null);
   const [isCheckoutModalOpen, setIsCheckoutModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [receiptFormat, setReceiptFormat] = useState<"standard" | "thermal_58mm">("thermal_58mm");
   const submittingRef = React.useRef(false);
 
   // Cart templates
@@ -384,130 +386,261 @@ export default function PointOfSaleView({
     }
   };
 
-  const handlePrintReceipt = () => {
+  const handlePrintReceiptFormatAware = () => {
     if (!activeReceipt) return;
 
-    const receiptContent = `
-      <html>
-        <head>
-          <title>রশিদ #${activeReceipt.invoiceId}</title>
-          <style>
-            @media print {
-              @page { size: 80mm auto; margin: 0; }
-              body { width: 72mm; margin: 0; padding: 5px; }
-            }
-            body { 
-              font-family: 'Courier New', Courier, monospace, 'Helvetica Neue', Helvetica; 
-              color: #000; 
-              margin: 0; 
-              padding: 10px; 
-              font-size: 11px; 
-              line-height: 1.4; 
-              width: 72mm;
-            }
-            .header { text-align: center; margin-bottom: 12px; border-bottom: 1px dashed #000; padding-bottom: 8px; }
-            .header h1 { margin: 0 0 4px 0; font-size: 16px; font-weight: bold; text-transform: uppercase; }
-            .header p { margin: 0; font-size: 10px; }
-            .metadata { margin-bottom: 8px; font-size: 10px; line-height: 1.4; border-bottom: 1px dashed #000; padding-bottom: 6px; }
-            table { width: 100%; border-collapse: collapse; margin-bottom: 8px; font-size: 10px; }
-            th { border-bottom: 1px dashed #000; padding: 4px 2px; text-align: left; font-weight: bold; }
-            td { padding: 5px 2px; border-bottom: 1px dotted #ccc; }
-            .text-right { text-align: right; }
-            .totals { font-size: 10px; border-top: 1px dashed #000; padding-top: 6px; margin-top: 4px; }
-            .totals-row { display: flex; justify-content: space-between; padding: 3px 0; }
-            .totals-row.grand { border-top: 1px dashed #000; border-bottom: 1px dashed #000; font-weight: bold; font-size: 12px; padding: 5px 0; margin-top: 2px; }
-            .footer { text-align: center; font-size: 9px; margin-top: 15px; border-top: 1px dashed #000; padding-top: 8px; font-weight: bold; }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <h1>সমীরা ট্রেডার্স</h1>
-            <p>ডিউ ও পেমেন্ট ক্যাশ মেমো (Thermal POS)</p>
-            <p>প্রোপাইটর: সমীরা ট্রেডার্স</p>
-          </div>
-          
-          <div class="metadata">
-            <div><strong>মেমো আইডি:</strong> ${activeReceipt.invoiceId}</div>
-            <div><strong>তারিখ:</strong> ${new Date(activeReceipt.date).toLocaleString('bn-BD', { hour12: true })}</div>
-            <div><strong>কাস্টমার:</strong> ${activeReceipt.customerName}</div>
-            <div><strong>রুট/রোড:</strong> ${activeReceipt.routeId !== "N/A" ? (routes.find(r => r.id === activeReceipt.routeId)?.name || 'N/A') : 'N/A'}</div>
-            <div><strong>বিক্রেতা/ Staff:</strong> ${activeReceipt.createdBy}</div>
-          </div>
+    let receiptContent = "";
 
-          <table>
-            <thead>
-              <tr>
-                <th>পণ্যের নাম</th>
-                <th class="text-right">পরিমাণ (C/P)</th>
-                <th class="text-right">ফ্রি</th>
-                <th class="text-right">ডিস্কাউন্ট</th>
-                <th class="text-right">মোট</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${activeReceipt.items.map((it: any) => {
-                const parts = [];
-                if (it.cartons) parts.push(it.cartons + 'C');
-                if (it.pieces) parts.push(it.pieces + 'P');
-                const qtyStr = parts.join(' / ') || 'None';
-                const rateVal = Number(it.rate || 0);
-                const totalVal = Number(it.total || it.lineTotal || 0);
-                return `
-                  <tr>
-                    <td>
-                      <strong>${it.name}</strong>
-                      <div style="font-size: 9px; color: #555;">@ ${rateVal.toFixed(2)} ৳</div>
-                    </td>
-                    <td class="text-right">${qtyStr}</td>
-                    <td class="text-right">${it.freeQty || 0}</td>
-                    <td class="text-right">${it.discount ? it.discount + ' ৳' : '০'}</td>
-                    <td class="text-right"><strong>${totalVal.toFixed(2)} ৳</strong></td>
-                  </tr>
-                `;
-              }).join('')}
-            </tbody>
-          </table>
+    if (receiptFormat === "thermal_58mm") {
+      receiptContent = `
+        <html>
+          <head>
+            <title>রশিদ #${activeReceipt.invoiceId}</title>
+            <style>
+              @media print {
+                @page { size: 58mm auto; margin: 0; }
+                body { width: 48mm; margin: 0; padding: 2px; }
+              }
+              body {
+                font-family: 'Courier New', Courier, monospace, 'Helvetica Neue', Helvetica;
+                color: #000;
+                margin: 0;
+                padding: 5px;
+                font-size: 10px;
+                line-height: 1.3;
+                width: 48mm;
+              }
+              .center { text-align: center; }
+              .bold { font-weight: bold; }
+              .right { text-align: right; }
+              .divider { border-top: 1px dashed #000; margin: 5px 0; }
+              .double-divider { border-top: 1px double #000; margin: 5px 0; }
+              table { width: 100%; border-collapse: collapse; font-size: 9px; }
+              td { padding: 2px 0; vertical-align: top; }
+              .row { display: flex; justify-content: space-between; }
+            </style>
+          </head>
+          <body>
+            <div class="center">
+              <h3 style="margin: 0; font-size: 13px; font-weight: 900;">সমীরা ট্রেডার্স</h3>
+              <p style="margin: 2px 0 0 0; font-size: 8px;">চকবাজার, ঢাকা | ডিস্ট্রিবিউশন সিস্টেম</p>
+              <p style="margin: 2px 0 0 0; font-size: 9px; font-weight: bold;">ক্যাশ মেমো / রশিদ</p>
+            </div>
+            
+            <div class="divider"></div>
+            
+            <div style="font-size: 8px; line-height: 1.3;">
+              <div class="row"><span>মেমো আইডি:</span><span class="bold">${activeReceipt.invoiceId}</span></div>
+              <div class="row"><span>তারিখ:</span><span>${new Date(activeReceipt.date).toLocaleString('bn-BD', { hour12: true })}</span></div>
+              <div class="row"><span>কাস্টমার:</span><span class="bold">${activeReceipt.customerName}</span></div>
+              <div class="row"><span>রুট/রোড:</span><span>${activeReceipt.routeId !== "N/A" ? (routes.find(r => r.id === activeReceipt.routeId)?.name || 'N/A') : 'N/A'}</span></div>
+              <div class="row"><span>বিক্রেতা:</span><span>${activeReceipt.createdBy}</span></div>
+            </div>
+            
+            <div class="divider"></div>
+            
+            <table>
+              <thead>
+                <tr style="border-bottom: 1px dashed #000; font-weight: bold;">
+                  <th style="text-align: left; width: 55%; padding-bottom: 3px;">পণ্য/দর</th>
+                  <th style="text-align: center; width: 20%; padding-bottom: 3px;">পরিমাণ</th>
+                  <th style="text-align: right; width: 25%; padding-bottom: 3px;">মূল্য</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${activeReceipt.items.map((it: any) => {
+                  const parts = [];
+                  if (it.cartons) parts.push(it.cartons + "C");
+                  if (it.pieces) parts.push(it.pieces + "P");
+                  const qtyStr = parts.join('/') || '0P';
+                  const rateVal = Number(it.rate || 0);
+                  const totalVal = Number(it.total || it.lineTotal || 0);
+                  const freeText = it.freeQty ? `(+${it.freeQty} Free)` : '';
+                  const discText = it.discount ? `(-${it.discount} ৳)` : '';
+                  return `
+                    <tr style="border-bottom: 1px dotted #ccc;">
+                      <td style="padding: 3px 0;">
+                        <span class="bold">${it.name}</span><br/>
+                        <span style="font-size: 7.5px; color: #444;">@ ${rateVal.toFixed(2)} ৳ ${freeText} ${discText}</span>
+                      </td>
+                      <td style="text-align: center; font-weight: bold; padding: 3px 0;">${qtyStr}</td>
+                      <td style="text-align: right; font-weight: bold; padding: 3px 0;">${totalVal.toFixed(2)} ৳</td>
+                    </tr>
+                  `;
+                }).join('')}
+              </tbody>
+            </table>
+            
+            <div class="divider"></div>
+            
+            <div style="font-size: 9px; margin-top: 5px;">
+              <div class="row">
+                <span>মোট মূল্য:</span>
+                <span>${(Number(activeReceipt.total || 0) + activeReceipt.items.reduce((a: number, c: any) => a + (Number(c.discount) || 0), 0)).toFixed(2)} ৳</span>
+              </div>
+              ${activeReceipt.items.reduce((a: number, c: any) => a + (Number(c.discount) || 0), 0) > 0 ? `
+                <div class="row" style="color: #c2410c;">
+                  <span>মোট ডিস্কাউন্ট:</span>
+                  <span>-${activeReceipt.items.reduce((a: number, c: any) => a + (Number(c.discount) || 0), 0).toFixed(2)} ৳</span>
+                </div>
+              ` : ''}
+              <div class="row" style="font-weight: bold; border-top: 1px dashed #000; border-bottom: 1px dashed #000; padding: 3px 0; margin: 3px 0; font-size: 10px;">
+                <span>চূড়ান্ত বিল:</span>
+                <span>${Number(activeReceipt.total || 0).toFixed(2)} ৳</span>
+              </div>
+              <div class="row" style="font-weight: bold;">
+                <span>সংগৃহীত পেমেন্ট:</span>
+                <span>${Number(activeReceipt.paidAmount || 0).toFixed(2)} ৳</span>
+              </div>
+              ${Number(activeReceipt.dueAmount || 0) > 0 ? `
+                <div class="row" style="font-weight: bold; color: #b91c1c;">
+                  <span>বকেয়া বাকী (Due):</span>
+                  <span>${Number(activeReceipt.dueAmount || 0).toFixed(2)} ৳</span>
+                </div>
+              ` : ''}
+            </div>
+            
+            <div class="double-divider"></div>
+            
+            <div class="center" style="font-size: 8px; color: #444; margin-top: 6px;">
+              <p style="font-weight: bold; margin: 0;">ক্রয় করার জন্য ধন্যবাদ!</p>
+              <p style="margin: 2px 0 0 0;">সমীরা ট্রেডার্স ডিস্ট্রিবিউশন সফটওয়্যার</p>
+            </div>
+            
+            <script>
+              window.onload = function() { window.print(); }
+            </script>
+          </body>
+        </html>
+      `;
+    } else {
+      receiptContent = `
+        <html>
+          <head>
+            <title>রশিদ #${activeReceipt.invoiceId}</title>
+            <style>
+              @media print {
+                @page { size: 80mm auto; margin: 0; }
+                body { width: 72mm; margin: 0; padding: 5px; }
+              }
+              body { 
+                font-family: 'Courier New', Courier, monospace, 'Helvetica Neue', Helvetica; 
+                color: #000; 
+                margin: 0; 
+                padding: 10px; 
+                font-size: 11px; 
+                line-height: 1.4; 
+                width: 72mm;
+              }
+              .header { text-align: center; margin-bottom: 12px; border-bottom: 1px dashed #000; padding-bottom: 8px; }
+              .header h1 { margin: 0 0 4px 0; font-size: 16px; font-weight: bold; text-transform: uppercase; }
+              .header p { margin: 0; font-size: 10px; }
+              .metadata { margin-bottom: 8px; font-size: 10px; line-height: 1.4; border-bottom: 1px dashed #000; padding-bottom: 6px; }
+              table { width: 100%; border-collapse: collapse; margin-bottom: 8px; font-size: 10px; }
+              th { border-bottom: 1px dashed #000; padding: 4px 2px; text-align: left; font-weight: bold; }
+              td { padding: 5px 2px; border-bottom: 1px dotted #ccc; }
+              .text-right { text-align: right; }
+              .totals { font-size: 10px; border-top: 1px dashed #000; padding-top: 6px; margin-top: 4px; }
+              .totals-row { display: flex; justify-content: space-between; padding: 3px 0; }
+              .totals-row.grand { border-top: 1px dashed #000; border-bottom: 1px dashed #000; font-weight: bold; font-size: 12px; padding: 5px 0; margin-top: 2px; }
+              .footer { text-align: center; font-size: 9px; margin-top: 15px; border-top: 1px dashed #000; padding-top: 8px; font-weight: bold; }
+            </style>
+          </head>
+          <body>
+            <div class="header">
+              <h1>সমীরা ট্রেডার্স</h1>
+              <p>ডিউ ও পেমেন্ট ক্যাশ মেমো (Thermal POS)</p>
+              <p>প্রোপাইটর: সমীরা ট্রেডার্স</p>
+            </div>
+            
+            <div class="metadata">
+              <div><strong>মেমো আইডি:</strong> ${activeReceipt.invoiceId}</div>
+              <div><strong>তারিখ:</strong> ${new Date(activeReceipt.date).toLocaleString('bn-BD', { hour12: true })}</div>
+              <div><strong>কাস্টমার:</strong> ${activeReceipt.customerName}</div>
+              <div><strong>রুট/রোড:</strong> ${activeReceipt.routeId !== "N/A" ? (routes.find(r => r.id === activeReceipt.routeId)?.name || 'N/A') : 'N/A'}</div>
+              <div><strong>বিক্রেতা/ Staff:</strong> ${activeReceipt.createdBy}</div>
+            </div>
 
-          <div class="totals">
-            <div class="totals-row">
-              <span>মোট মূল্য:</span>
-              <span>${(Number(activeReceipt.total || 0) + activeReceipt.items.reduce((a: number, c: any) => a + (Number(c.discount) || 0), 0)).toFixed(2)} ৳</span>
-            </div>
-            <div class="totals-row">
-              <span>মোট ডিস্কাউন্ট:</span>
-              <span>-${activeReceipt.items.reduce((a: number, c: any) => a + (Number(c.discount) || 0), 0).toFixed(2)} ৳</span>
-            </div>
-            <div class="totals-row grand">
-              <span>চূড়ান্ত বিল:</span>
-              <span>${Number(activeReceipt.total || 0).toFixed(2)} ৳</span>
-            </div>
-            <div class="totals-row" style="font-weight: bold;">
-              <span>সংগৃহীত পেমেন্ট:</span>
-              <span>${Number(activeReceipt.paidAmount || 0).toFixed(2)} ৳</span>
-            </div>
-            <div class="totals-row" style="font-weight: bold; color: ${Number(activeReceipt.dueAmount || 0) > 0 ? '#b91c1c' : '#000'}">
-              <span>অবশিষ্ট বাকী (Due):</span>
-              <span>${Number(activeReceipt.dueAmount || 0).toFixed(2)} ৳</span>
-            </div>
-          </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>পণ্যের নাম</th>
+                  <th class="text-right">পরিমাণ (C/P)</th>
+                  <th class="text-right">ফ্রি</th>
+                  <th class="text-right">ডিস্কাউন্ট</th>
+                  <th class="text-right">মোট</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${activeReceipt.items.map((it: any) => {
+                  const parts = [];
+                  if (it.cartons) parts.push(it.cartons + 'C');
+                  if (it.pieces) parts.push(it.pieces + 'P');
+                  const qtyStr = parts.join(' / ') || 'None';
+                  const rateVal = Number(it.rate || 0);
+                  const totalVal = Number(it.total || it.lineTotal || 0);
+                  return `
+                    <tr>
+                      <td>
+                        <strong>${it.name}</strong>
+                        <div style="font-size: 9px; color: #555;">@ ${rateVal.toFixed(2)} ৳</div>
+                      </td>
+                      <td class="text-right">${qtyStr}</td>
+                      <td class="text-right">${it.freeQty || 0}</td>
+                      <td class="text-right">${it.discount ? it.discount + ' ৳' : '০'}</td>
+                      <td class="text-right"><strong>${totalVal.toFixed(2)} ৳</strong></td>
+                    </tr>
+                  `;
+                }).join('')}
+              </tbody>
+            </table>
 
-          <div class="footer">
-            <p>ক্রয় করার জন্য আপনাকে ধন্যবাদ!</p>
-            <p>সমীরা ট্রেডার্স ডিস্ট্রিবিউশন সিস্টেম</p>
-          </div>
-          
-          <script>
-            window.onload = function() { window.print(); }
-          </script>
-        </body>
-      </html>
-    `;
+            <div class="totals">
+              <div class="totals-row">
+                <span>মোট মূল্য:</span>
+                <span>${(Number(activeReceipt.total || 0) + activeReceipt.items.reduce((a: number, c: any) => a + (Number(c.discount) || 0), 0)).toFixed(2)} ৳</span>
+              </div>
+              <div class="totals-row">
+                <span>মোট ডিস্কাউন্ট:</span>
+                <span>-${activeReceipt.items.reduce((a: number, c: any) => a + (Number(c.discount) || 0), 0).toFixed(2)} ৳</span>
+              </div>
+              <div class="totals-row grand">
+                <span>চূড়ান্ত বিল:</span>
+                <span>${Number(activeReceipt.total || 0).toFixed(2)} ৳</span>
+              </div>
+              <div class="totals-row" style="font-weight: bold;">
+                <span>সংগৃহীত পেমেন্ট:</span>
+                <span>${Number(activeReceipt.paidAmount || 0).toFixed(2)} ৳</span>
+              </div>
+              <div class="totals-row" style="font-weight: bold; color: ${Number(activeReceipt.dueAmount || 0) > 0 ? '#b91c1c' : '#000'}">
+                <span>অবশিষ্ট বাকী (Due):</span>
+                <span>${Number(activeReceipt.dueAmount || 0).toFixed(2)} ৳</span>
+              </div>
+            </div>
+
+            <div class="footer">
+              <p>ক্রয় করার জন্য আপনাকে ধন্যবাদ!</p>
+              <p>সমীরা ট্রেডার্স ডিস্ট্রিবিউশন সিস্টেম</p>
+            </div>
+            
+            <script>
+              window.onload = function() { window.print(); }
+            </script>
+          </body>
+        </html>
+      `;
+    }
 
     const printWindow = window.open("", "_blank");
     if (printWindow) {
       printWindow.document.write(receiptContent);
       printWindow.document.close();
     }
+  };
+
+  const handlePrintReceipt = () => {
+    if (!activeReceipt) return;
+    handlePrintReceiptFormatAware();
   };
 
   return (
@@ -946,6 +1079,35 @@ export default function PointOfSaleView({
                 <div className="flex justify-between text-rose-600 font-black border-t border-dashed pt-1">
                   <span>বকেয়া বাকী (Due):</span>
                   <span>{formatCurrency(activeReceipt.dueAmount)}</span>
+                </div>
+              </div>
+
+              {/* Receipt Format Selection */}
+              <div className="border-t pt-4 space-y-2">
+                <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">রশিদ ফরম্যাট / Receipt Size</label>
+                <div className="grid grid-cols-2 gap-2 bg-gray-100 p-1 rounded-xl">
+                  <button
+                    type="button"
+                    onClick={() => setReceiptFormat("thermal_58mm")}
+                    className={`py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      receiptFormat === "thermal_58mm"
+                        ? "bg-white text-black shadow-xs border-gray-200 border"
+                        : "text-gray-500 hover:text-gray-850"
+                    }`}
+                  >
+                    ৫৮ মিমি (58mm Thermal)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setReceiptFormat("standard")}
+                    className={`py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      receiptFormat === "standard"
+                        ? "bg-white text-black shadow-xs border-gray-200 border"
+                        : "text-gray-500 hover:text-gray-850"
+                    }`}
+                  >
+                    ৮০ মিমি (80mm Standard)
+                  </button>
                 </div>
               </div>
             </div>

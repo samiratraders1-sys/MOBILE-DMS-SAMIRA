@@ -10,6 +10,7 @@ import { jsPDF } from "jspdf";
 import toast from "react-hot-toast";
 import { db } from "../lib/firebase";
 import { collection, getDocs } from "firebase/firestore";
+import { calculateNetProfit } from "../utils/profitEngine";
 
 interface DashboardProps {
   products: any[];
@@ -22,12 +23,27 @@ interface DashboardProps {
   sales?: any[];
   activityLogs?: any[];
   subDbs?: any[];
+  subDbShipments?: any[];
+  expenses?: any[];
   setActiveView: (view: string) => void;
   role?: string;
   allowedViews?: string[];
 }
 
-export default function DashboardView({ products, summaries, customers, suppliers, purchases, routes, payments = [], sales = [], activityLogs = [], subDbs = [], setActiveView, role, allowedViews }: DashboardProps) {
+export default function DashboardView(props: DashboardProps) {
+  const products = Array.isArray(props.products) ? props.products : [];
+  const summaries = Array.isArray(props.summaries) ? props.summaries : [];
+  const customers = Array.isArray(props.customers) ? props.customers : [];
+  const suppliers = Array.isArray(props.suppliers) ? props.suppliers : [];
+  const purchases = Array.isArray(props.purchases) ? props.purchases : [];
+  const routes = Array.isArray(props.routes) ? props.routes : [];
+  const payments = Array.isArray(props.payments) ? props.payments : [];
+  const sales = Array.isArray(props.sales) ? props.sales : [];
+  const activityLogs = Array.isArray(props.activityLogs) ? props.activityLogs : [];
+  const subDbs = Array.isArray(props.subDbs) ? props.subDbs : [];
+  const subDbShipments = Array.isArray(props.subDbShipments) ? props.subDbShipments : [];
+  const expenses = Array.isArray(props.expenses) ? props.expenses : [];
+  const { setActiveView, role, allowedViews } = props;
   const { language, t, formatNumber } = useLanguage();
   const [aiInsight, setAiInsight] = useState<string | null>(null);
   const [loadingAi, setLoadingAi] = useState(false);
@@ -35,6 +51,7 @@ export default function DashboardView({ products, summaries, customers, supplier
   const [dailyTimeframe, setDailyTimeframe] = useState<"7" | "30">("30");
   const [inventoryFilter, setInventoryFilter] = useState<"all" | "low" | "out">("all");
   const [hubActiveTab, setHubActiveTab] = useState<"workspace" | "data-entry" | "reports">("workspace");
+  const [drillDownStat, setDrillDownStat] = useState<string | null>(null);
 
   const [isOnline, setIsOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true);
   const [lastSync, setLastSync] = useState<string | null>(() => {
@@ -253,28 +270,16 @@ export default function DashboardView({ products, summaries, customers, supplier
 
   const isManagerOrAdmin = role === "admin" || role === "manager";
   
-  // Calculations for KPI grid
+  // Calculations for KPI grid using centralized ProfitEngine
   const kpiValues = useMemo(() => {
-    let totalSalesValue = 0;
     let totalReturnVal = 0;
-    let totalExpenses = 0;
-    let totalCostOfSales = 0;
     let totalFreeCount = 0;
     let totalDiscountCount = 0;
     
     summaries.filter(s => s.status === 'settled').forEach(s => {
-      totalSalesValue += (s.salesValue || 0);
-      totalExpenses += (s.expenses || []).reduce((acc: number, e: any) => acc + (e.amount || 0), 0);
-      
       (s.items || []).forEach((item: any) => {
-        const prod = products.find(p => p.id === item.productId);
-        const cost = prod?.cost || item.cost || 0;
-        
         const returns = item.returns || 0;
         totalReturnVal += (returns * item.price);
-        
-        const soldQty = item.totalPieces - returns - (item.free || 0);
-        totalCostOfSales += (soldQty * cost);
         totalFreeCount += (item.free || 0);
       });
     });
@@ -286,11 +291,25 @@ export default function DashboardView({ products, summaries, customers, supplier
       });
     });
 
-    const netProfit = totalSalesValue - totalCostOfSales - totalExpenses;
-    const profitMargin = totalSalesValue > 0 ? (netProfit / totalSalesValue) * 100 : 0;
+    const metrics = calculateNetProfit({
+      sales,
+      payments,
+      summaries,
+      products,
+      subDbShipments,
+      expenses
+    });
 
-    return { totalSalesValue, netProfit, profitMargin, totalExpenses, totalReturnVal, totalFreeCount, totalDiscountCount };
-  }, [products, summaries, sales]);
+    return { 
+      totalSalesValue: metrics.salesRevenue, 
+      netProfit: metrics.netProfit, 
+      profitMargin: metrics.salesRevenue > 0 ? (metrics.netProfit / metrics.salesRevenue) * 100 : 0, 
+      totalExpenses: metrics.totalExpenses, 
+      totalReturnVal, 
+      totalFreeCount, 
+      totalDiscountCount 
+    };
+  }, [products, summaries, sales, payments, subDbShipments, expenses]);
 
   const { totalSalesValue, netProfit, profitMargin, totalExpenses, totalReturnVal, totalFreeCount, totalDiscountCount } = kpiValues;
 
@@ -429,8 +448,8 @@ export default function DashboardView({ products, summaries, customers, supplier
       };
     });
 
-    summaries
-      .filter(s => s.status === 'settled')
+    (summaries || [])
+      .filter(s => s && s.status === 'settled')
       .forEach(s => {
         const freeQtyMap: Record<string, number> = {};
         (s.freeItems || []).forEach((f: any) => {
@@ -508,44 +527,60 @@ export default function DashboardView({ products, summaries, customers, supplier
 
     // 1. Process POS sales (salesProp)
     (sales || []).forEach(sale => {
-      if (!sale.date) return;
+      if (!sale || typeof sale !== 'object') return;
+      if (!sale.date || typeof sale.date !== 'string') return;
       const dateStr = sale.date.slice(0, 10);
       if (dailySalesMap[dateStr] !== undefined) {
         let saleAmt = 0;
-        if (sale.items && sale.items.length > 0) {
+        if (sale.items && Array.isArray(sale.items) && sale.items.length > 0) {
           sale.items.forEach((item: any) => {
-            const qty = Number(item.qty || item.quantity || 0);
+            if (!item || typeof item !== 'object') return;
+            // Robust type guarding for item.qty
+            const rawQty = item.qty !== undefined ? item.qty : (item.quantity !== undefined ? item.quantity : 0);
+            const qty = Number(rawQty);
+            if (isNaN(qty) || qty <= 0) return;
             const price = Number(item.price || 0);
+            if (isNaN(price)) return;
             saleAmt += qty * price;
           });
         } else {
           saleAmt = Number(sale.total || 0);
         }
-        dailySalesMap[dateStr] += saleAmt;
+        if (!isNaN(saleAmt)) {
+          dailySalesMap[dateStr] += saleAmt;
+        }
       }
     });
 
     // 2. Process route sales (summaries)
-    summaries
-      .filter(s => s.status === 'settled')
+    (summaries || [])
+      .filter(s => s && s.status === 'settled')
       .forEach(s => {
-        if (!s.date) return;
+        if (!s || typeof s !== 'object' || !s.date || typeof s.date !== 'string') return;
         const dateStr = s.date.slice(0, 10);
         if (dailySalesMap[dateStr] !== undefined) {
           let routeAmt = 0;
           const freeQtyMap: Record<string, number> = {};
           (s.freeItems || []).forEach((f: any) => {
+            if (!f || typeof f !== 'object') return;
             const qty = Number(f.quantity || 0);
-            freeQtyMap[f.productId] = (freeQtyMap[f.productId] || 0) + qty;
+            if (!isNaN(qty)) {
+              freeQtyMap[f.productId] = (freeQtyMap[f.productId] || 0) + qty;
+            }
           });
 
           const items = s.items || [];
           items.forEach((item: any) => {
-            const totalSold = Math.max(0, Number(item.soldQty !== undefined ? item.soldQty : (item.totalPieces - (item.returns || 0))));
+            if (!item || typeof item !== 'object') return;
+            const totalPieces = Number(item.totalPieces || 0);
+            const returns = Number(item.returns || 0);
+            const totalSold = Math.max(0, Number(item.soldQty !== undefined ? item.soldQty : (totalPieces - returns)));
             const freeQty = freeQtyMap[item.productId] || 0;
             const netSold = Math.max(0, totalSold - freeQty);
             const sellPrice = Number(item.price || 0);
-            routeAmt += netSold * sellPrice;
+            if (!isNaN(netSold) && !isNaN(sellPrice)) {
+              routeAmt += netSold * sellPrice;
+            }
           });
           dailySalesMap[dateStr] += routeAmt;
         }
@@ -660,38 +695,6 @@ export default function DashboardView({ products, summaries, customers, supplier
       doc.text(`Report Exported: ${dateStr}`, 142, 17);
       doc.text(`Administrator: samiratraders1@gmail.com`, 142, 24);
       doc.text(`Scope: Active Financial & Ops Snapshot`, 142, 31);
-
-      // Section 1 Check
-      let totalSalesValue = 0;
-      let totalReturnVal = 0;
-      let totalExpenses = 0;
-      let totalCostOfSales = 0;
-      let totalFreeCount = 0;
-      let totalDiscountCount = 0;
-      
-      summaries.filter(s => s.status === 'settled').forEach(s => {
-        totalSalesValue += (s.salesValue || 0);
-        totalExpenses += (s.expenses || []).reduce((acc: number, e: any) => acc + (e.amount || 0), 0);
-        
-        (s.items || []).forEach((item: any) => {
-          const prod = products.find(p => p.id === item.productId);
-          const cost = prod?.cost || item.cost || 0;
-          const returns = item.returns || 0;
-          totalReturnVal += (returns * item.price);
-          const soldQty = item.totalPieces - returns - (item.free || 0);
-          totalCostOfSales += (soldQty * cost);
-          totalFreeCount += (item.free || 0);
-        });
-      });
-
-      (sales || []).forEach((sale: any) => {
-        (sale.items || []).forEach((item: any) => {
-          totalFreeCount += Number(item.freeQty || 0);
-          totalDiscountCount += Number(item.discount || 0);
-        });
-      });
-
-      const netProfit = totalSalesValue - totalCostOfSales - totalExpenses;
 
       // Section 1 Header
       doc.setTextColor(textDark[0], textDark[1], textDark[2]);
@@ -1155,8 +1158,8 @@ export default function DashboardView({ products, summaries, customers, supplier
           {[
             { label: "বিক্রয়", icon: ShoppingCart, view: "orders" },
             { label: "ক্রয়", icon: Package, view: "purchase" },
-            { label: "কাস্টমার", icon: Users, view: "customers" },
-            { label: "সাপ্লায়ার", icon: Truck, view: "suppliers" },
+            { label: "কাস্টমার", icon: Users, view: "customer-mgmt" },
+            { label: "সাপ্লায়ার", icon: Truck, view: "supplier-mgmt" },
             { label: "পেমেন্ট", icon: DollarSign, view: "payment-history" },
             { label: "পেমেন্ট রিসিভ", icon: Wallet, view: "payment-history" },
             { label: "ট্রান্সফার", icon: RefreshCw, view: "finance" },
@@ -1297,7 +1300,7 @@ export default function DashboardView({ products, summaries, customers, supplier
           </button>
         </div>
       </motion.div>
-      {/* New Enterprise KPI Grid - Compact & Attractive */}
+      {/* New Enterprise KPI Grid - Compact & Attractive (Clickable Drill Down) */}
       <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3 mb-6">
         {[
           { label: "Total Sales", value: formatCurrency(totalSalesValue), icon: TrendingUp, color: "text-blue-600", bg: "bg-blue-50" },
@@ -1305,17 +1308,21 @@ export default function DashboardView({ products, summaries, customers, supplier
           { label: "Orders", value: summaries.length.toString(), icon: ShoppingCart, color: "text-violet-600", bg: "bg-violet-50" },
           { label: "Customers", value: customers.length.toString(), icon: Users, color: "text-amber-600", bg: "bg-amber-50" },
           { label: "Collection", value: formatCurrency(summaries.reduce((acc, s) => acc + (s.payment || 0), 0)), icon: Database, color: "text-sky-600", bg: "bg-sky-50" },
-          { label: "Outstanding Due", value: formatCurrency(customers.reduce((acc, c) => acc + (c.due || 0), 0)), icon: AlertTriangle, color: "text-red-600", bg: "bg-red-50" },
+          { label: "Outstanding Due", value: formatCurrency(customers.reduce((acc, c) => acc + (Number(c.balance || c.due || 0)), 0)), icon: AlertTriangle, color: "text-red-600", bg: "bg-red-50" },
         ].map((stat, i) => (
-          <div key={stat.label} className="bg-white p-3 rounded-2xl border border-gray-100 shadow-sm flex items-center gap-3">
-            <div className={`p-2 rounded-xl ${stat.bg} ${stat.color}`}>
+          <button 
+            key={stat.label} 
+            onClick={() => setDrillDownStat(stat.label)}
+            className="bg-white p-3 rounded-2xl border border-gray-100 shadow-sm flex items-center gap-3 cursor-pointer hover:shadow-md transition-all active:scale-95 text-left w-full"
+          >
+            <div className={`p-2 rounded-xl ${stat.bg} ${stat.color} shrink-0`}>
               <stat.icon className="w-4 h-4" />
             </div>
-            <div>
-              <p className="text-[9px] font-extrabold text-gray-500 uppercase tracking-widest">{stat.label}</p>
-              <p className="text-sm font-black text-gray-950 leading-none mt-0.5">{stat.value}</p>
+            <div className="min-w-0">
+              <p className="text-[9px] font-extrabold text-gray-500 uppercase tracking-widest truncate">{stat.label}</p>
+              <p className="text-sm font-black text-gray-950 leading-none mt-0.5 truncate">{stat.value}</p>
             </div>
-          </div>
+          </button>
         ))}
       </div>
 
@@ -1635,7 +1642,7 @@ export default function DashboardView({ products, summaries, customers, supplier
               {/* Customer management */}
               <motion.div
                 whileHover={{ y: -4, scale: 1.01 }}
-                onClick={() => setActiveView("customers")}
+                onClick={() => setActiveView("customer-mgmt")}
                 className="bg-white p-6 rounded-2xl border border-slate-200 hover:border-emerald-300 hover:shadow-md cursor-pointer transition-all flex flex-col justify-between group"
               >
                 <div className="flex justify-between items-start mb-4">
@@ -2182,6 +2189,238 @@ export default function DashboardView({ products, summaries, customers, supplier
           </div>
         )}
       </AnimatePresence>
+
+      {/* Drill Down Modal */}
+      {drillDownStat && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-[9999]">
+          <div className="bg-white rounded-3xl w-full max-w-4xl max-h-[85vh] overflow-hidden flex flex-col shadow-2xl border border-gray-100">
+            <div className="p-6 bg-slate-900 text-white flex items-center justify-between">
+              <div>
+                <h3 className="text-xl font-black tracking-tight">{drillDownStat} - বিস্তারিত বিবরণী</h3>
+                <p className="text-xs text-slate-300 mt-1 font-medium">রিয়েল-টাইম ইআরপি ট্রানজেকশন অডিট লগ</p>
+              </div>
+              <button 
+                onClick={() => setDrillDownStat(null)}
+                className="p-2 hover:bg-white/10 rounded-xl transition-all font-black text-white cursor-pointer"
+              >
+                ✕ বন্ধ করুন
+              </button>
+            </div>
+            
+            <div className="p-6 overflow-y-auto flex-1 space-y-4">
+              {drillDownStat === "Total Sales" && (
+                <div className="space-y-3">
+                  <p className="text-xs text-slate-500 font-semibold">সকল বিক্রয় অর্ডার এবং ডেসপ্যাচ ট্রানজেকশন সমূহ:</p>
+                  <div className="overflow-x-auto border border-gray-100 rounded-2xl">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-slate-50 text-slate-600 text-xs font-bold border-b border-gray-100">
+                          <th className="p-3">তারিখ</th>
+                          <th className="p-3">কাস্টমার</th>
+                          <th className="p-3">অর্ডার আইডি</th>
+                          <th className="p-3">পরিমাণ (টাকা)</th>
+                          <th className="p-3">অবস্থা</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-50 text-xs font-semibold text-gray-700">
+                        {sales.map((sale: any) => (
+                          <tr key={sale.id} className="hover:bg-gray-50/50">
+                            <td className="p-3">{sale.date}</td>
+                            <td className="p-3">{sale.customerName || customers.find((c: any) => c.id === sale.customerId)?.name || "অজানা"}</td>
+                            <td className="p-3 font-mono text-[10px] text-gray-500">{sale.id?.slice(0, 8)}</td>
+                            <td className="p-3 font-bold text-gray-950">{formatCurrency(sale.totalAmount || sale.netPayable || 0)}</td>
+                            <td className="p-3">
+                              <span className={`px-2 py-0.5 rounded text-[10px] ${sale.approved ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                                {sale.approved ? 'অনুমোদিত' : 'পেন্ডিং'}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                        {sales.length === 0 && (
+                          <tr>
+                            <td colSpan={5} className="p-6 text-center text-slate-400 font-bold">কোনো বিক্রয় রেকর্ড পাওয়া যায়নি</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {drillDownStat === "Revenue" && (
+                <div className="space-y-4">
+                  <div className="bg-slate-50 p-6 rounded-2xl border border-slate-150 grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div>
+                      <span className="text-[10px] font-black text-slate-500 uppercase">মোট বিক্রয় মূল্য</span>
+                      <p className="text-lg font-black text-slate-900 mt-1">{formatCurrency(totalSalesValue)}</p>
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-black text-rose-500 uppercase">মোট কেনা মূল্য (COGS)</span>
+                      <p className="text-lg font-black text-rose-600 mt-1">-{formatCurrency(totalSalesValue - netProfit - totalExpenses)}</p>
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-black text-amber-500 uppercase">মোট পরিচালন ব্যয়</span>
+                      <p className="text-lg font-black text-amber-600 mt-1">-{formatCurrency(totalExpenses)}</p>
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-black text-emerald-500 uppercase">নিট লাভ (Net Profit)</span>
+                      <p className="text-lg font-black text-emerald-700 mt-1">{formatCurrency(netProfit)}</p>
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-slate-500 font-bold italic">* এই হিসাবটি ইআরপি-র মূল প্রফিট ইঞ্জিন দ্বারা পরিচালিত: লাভ = (বিক্রয় মূল্য - ক্রয় মূল্য) - খরচ।</p>
+                </div>
+              )}
+
+              {drillDownStat === "Orders" && (
+                <div className="space-y-3">
+                  <p className="text-xs text-slate-500 font-semibold">রুটের বিক্রয় সামারি ও ডেসপ্যাচ ট্রানজেকশন সমূহ:</p>
+                  <div className="overflow-x-auto border border-gray-100 rounded-2xl">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-slate-50 text-slate-600 text-xs font-bold border-b border-gray-100">
+                          <th className="p-3">তারিখ</th>
+                          <th className="p-3">রুট / ডিএসআর</th>
+                          <th className="p-3">আইডি</th>
+                          <th className="p-3">মোট বিক্রয় মূল্য (টাকা)</th>
+                          <th className="p-3">অবস্থা</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-50 text-xs font-semibold text-gray-700">
+                        {summaries.map((s: any) => (
+                          <tr key={s.id} className="hover:bg-gray-50/50">
+                            <td className="p-3">{s.date || s.settlementDate}</td>
+                            <td className="p-3">{s.routeName || s.dsrName || "অজানা রুট"}</td>
+                            <td className="p-3 font-mono text-[10px] text-gray-500">{s.id?.slice(0, 8)}</td>
+                            <td className="p-3 font-bold text-gray-950">{formatCurrency(s.salesValue || 0)}</td>
+                            <td className="p-3">
+                              <span className={`px-2 py-0.5 rounded text-[10px] ${s.status === 'settled' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                                {s.status === 'settled' ? 'নিষ্পত্তিকৃত' : 'পেন্ডিং'}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                        {summaries.length === 0 && (
+                          <tr>
+                            <td colSpan={5} className="p-6 text-center text-slate-400 font-bold">কোনো অর্ডার সামারি রেকর্ড পাওয়া যায়নি</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {drillDownStat === "Customers" && (
+                <div className="space-y-3">
+                  <p className="text-xs text-slate-500 font-semibold">সকল কাস্টমারদের বকেয়া ও যোগাযোগের বিবরণী:</p>
+                  <div className="overflow-x-auto border border-gray-100 rounded-2xl">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-slate-50 text-slate-600 text-xs font-bold border-b border-gray-100">
+                          <th className="p-3">কাস্টমারের নাম</th>
+                          <th className="p-3">ফোন</th>
+                          <th className="p-3">ঠিকানা</th>
+                          <th className="p-3 text-right">বকেয়া পরিমাণ (টাকা)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-50 text-xs font-semibold text-gray-700">
+                        {customers.map((c: any) => (
+                          <tr key={c.id} className="hover:bg-gray-50/50">
+                            <td className="p-3 font-bold">{c.name}</td>
+                            <td className="p-3 text-gray-500">{c.contactDetails?.phone || c.phone || "নেই"}</td>
+                            <td className="p-3 text-gray-500">{c.contactDetails?.address || c.address || "নেই"}</td>
+                            <td className="p-3 text-right text-rose-600 font-bold font-mono">{formatCurrency(c.balance || c.due || 0)}</td>
+                          </tr>
+                        ))}
+                        {customers.length === 0 && (
+                          <tr>
+                            <td colSpan={4} className="p-6 text-center text-slate-400 font-bold">কোনো কাস্টমার পাওয়া যায়নি</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {drillDownStat === "Collection" && (
+                <div className="space-y-3">
+                  <p className="text-xs text-slate-500 font-semibold">আজকের মোট কালেকশন ও জমা বিবরণী:</p>
+                  <div className="overflow-x-auto border border-gray-100 rounded-2xl">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-slate-50 text-slate-600 text-xs font-bold border-b border-gray-100">
+                          <th className="p-3">তারিখ</th>
+                          <th className="p-3">উৎস/ক্যাটাগরি</th>
+                          <th className="p-3">অ্যাকাউন্ট</th>
+                          <th className="p-3 text-right">কালেকশন পরিমাণ (টাকা)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-50 text-xs font-semibold text-gray-700">
+                        {payments.filter((p: any) => p.type === "in").map((p: any) => (
+                          <tr key={p.id} className="hover:bg-gray-50/50">
+                            <td className="p-3">{p.date}</td>
+                            <td className="p-3 font-bold">{p.category || p.description || "কালেকশন"}</td>
+                            <td className="p-3 text-gray-500">{p.accountName || p.accountId || "ক্যাশ অ্যাকাউন্ট"}</td>
+                            <td className="p-3 text-right text-green-600 font-bold font-mono">{formatCurrency(p.amount || 0)}</td>
+                          </tr>
+                        ))}
+                        {payments.filter((p: any) => p.type === "in").length === 0 && (
+                          <tr>
+                            <td colSpan={4} className="p-6 text-center text-slate-400 font-bold">আজ কোনো কালেকশন ট্রানজেকশন হয়নি</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {drillDownStat === "Outstanding Due" && (
+                <div className="space-y-3">
+                  <p className="text-xs text-slate-500 font-semibold">বকেয়া সম্পন্ন গ্রাহকদের বিবরণী:</p>
+                  <div className="overflow-x-auto border border-gray-100 rounded-2xl">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-slate-50 text-slate-600 text-xs font-bold border-b border-gray-100">
+                          <th className="p-3">গ্রাহকের নাম</th>
+                          <th className="p-3">ফোন</th>
+                          <th className="p-3">ঠিকানা</th>
+                          <th className="p-3 text-right">বকেয়া পরিমাণ (টাকা)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-50 text-xs font-semibold text-gray-700">
+                        {customers.filter((c: any) => Number(c.balance || c.due || 0) > 0).map((c: any) => (
+                          <tr key={c.id} className="hover:bg-gray-50/50">
+                            <td className="p-3 font-bold">{c.name}</td>
+                            <td className="p-3 text-gray-500">{c.contactDetails?.phone || c.phone || "নেই"}</td>
+                            <td className="p-3 text-gray-500">{c.contactDetails?.address || c.address || "নেই"}</td>
+                            <td className="p-3 text-right text-rose-600 font-bold font-mono">{formatCurrency(c.balance || c.due || 0)}</td>
+                          </tr>
+                        ))}
+                        {customers.filter((c: any) => Number(c.balance || c.due || 0) > 0).length === 0 && (
+                          <tr>
+                            <td colSpan={4} className="p-6 text-center text-slate-400 font-bold">বর্তমানে কোনো গ্রাহকের বকেয়া নেই</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+            
+            <div className="p-4 bg-slate-50 border-t border-gray-100 text-right">
+              <button 
+                onClick={() => setDrillDownStat(null)}
+                className="px-5 py-2 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 transition-all cursor-pointer"
+              >
+                বন্ধ করুন
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

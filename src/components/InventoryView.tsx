@@ -17,6 +17,8 @@ interface InventoryProps {
   suppliers: any[];
   summaries: any[];
   purchases: any[];
+  sales?: any[];
+  damageInventory?: any[];
   role?: string;
   stockAdjustments?: {
     data: any[];
@@ -27,7 +29,7 @@ interface InventoryProps {
   user?: any;
 }
 
-export default function InventoryView({ products, add, update, remove, suppliers, summaries, purchases, role, stockAdjustments, user }: InventoryProps) {
+export default function InventoryView({ products, add, update, remove, suppliers, summaries, purchases, sales = [], damageInventory = [], role, stockAdjustments, user }: InventoryProps) {
   const [showAdd, setShowAdd] = useState(false);
   const [showBulk, setShowBulk] = useState(false);
   const [bulkText, setBulkText] = useState("");
@@ -235,6 +237,50 @@ export default function InventoryView({ products, add, update, remove, suppliers
     const stock = Number(p.stock) || 0;
     return acc + (Math.max(0, stock) * (Number(p.cost) || 0));
   }, 0);
+
+  // Inventory Closing Engine Calculations
+  const inventoryClosingStats = useMemo(() => {
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    // Today's Sales Value
+    let todaysSalesValue = 0;
+    (sales || []).filter((s: any) => s.date === todayStr && s.approved).forEach((s: any) => {
+      todaysSalesValue += Number(s.total || s.totalAmount || 0);
+    });
+    (summaries || []).filter((s: any) => (s.settlementDate === todayStr || s.date === todayStr) && s.status === "settled" && s.approved).forEach((s: any) => {
+      todaysSalesValue += Number(s.salesValue || 0);
+    });
+
+    // Today's Damage Return Value
+    let todaysDamageReturnValue = 0;
+    (damageInventory || []).filter((d: any) => d.date === todayStr).forEach((d: any) => {
+      todaysDamageReturnValue += Math.abs(Number(d.quantity || 0)) * (Number(d.price) || 0);
+    });
+
+    // Today's Inventory Value (Using current stock and sale prices)
+    const todaysInventoryValue = products.reduce((acc, p) => {
+      const stock = Number(p.stock) || 0;
+      return acc + (Math.max(0, stock) * (Number(p.price) || 0));
+    }, 0);
+
+    // Closing Inventory Sales Value = (Today's Sales Value) + (Today's Damage Return Value)
+    const closingInventoryValue = todaysSalesValue + todaysDamageReturnValue;
+
+    // Yesterday's Inventory Value (Today's Value + Sales - Purchases)
+    let todaysPurchasesValue = 0;
+    (purchases || []).filter((p: any) => p.date === todayStr).forEach((p: any) => {
+      todaysPurchasesValue += Number(p.total || p.totalAmount || 0);
+    });
+    const yesterdaysInventoryValue = todaysInventoryValue + todaysSalesValue - todaysPurchasesValue;
+
+    return {
+      yesterdaysInventoryValue,
+      todaysSalesValue,
+      todaysDamageReturnValue,
+      todaysInventoryValue,
+      closingInventoryValue
+    };
+  }, [products, sales, summaries, damageInventory, purchases]);
 
   const downloadCSV = () => {
     const headers = ["Name", "SKU", "Category", "Stock", "Sale Price", "Purchase Cost", "Carton Size", "Unit", "Supplier Name"];
@@ -528,6 +574,34 @@ export default function InventoryView({ products, add, update, remove, suppliers
   return (
     <div className="space-y-6">
       {previewData.length > 0 && <DataPreviewModal data={previewData} onCancel={() => setPreviewData([])} onConfirm={confirmImportInventory} />}
+
+      {/* 📦 Inventory Closing Engine Summary Panel */}
+      <div className="bg-slate-950 text-white p-6 rounded-3xl border border-slate-800 shadow-xl grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-6">
+        <div className="flex flex-col justify-center">
+          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Yesterday's Inventory</span>
+          <span className="text-md font-extrabold text-slate-200 mt-1 font-mono">{formatCurrency(inventoryClosingStats.yesterdaysInventoryValue)}</span>
+        </div>
+        <div className="flex flex-col justify-center">
+          <span className="text-[10px] font-black text-rose-400 uppercase tracking-widest">Today's Sales Value</span>
+          <span className="text-md font-extrabold text-rose-300 mt-1 font-mono">-{formatCurrency(inventoryClosingStats.todaysSalesValue)}</span>
+        </div>
+        <div className="flex flex-col justify-center">
+          <span className="text-[10px] font-black text-green-400 uppercase tracking-widest">Today's Damage Return</span>
+          <span className="text-md font-extrabold text-green-300 mt-1 font-mono">+{formatCurrency(inventoryClosingStats.todaysDamageReturnValue)}</span>
+        </div>
+        <div className="flex flex-col justify-center">
+          <span className="text-[10px] font-black text-sky-400 uppercase tracking-widest">Today's Stock Value</span>
+          <span className="text-md font-extrabold text-sky-300 mt-1 font-mono">{formatCurrency(inventoryClosingStats.todaysInventoryValue)}</span>
+        </div>
+        <div className="flex flex-col justify-center bg-slate-900 p-4 rounded-2xl border border-slate-800 relative">
+          <span className="text-[10px] font-black text-amber-400 uppercase tracking-widest">Closing Inventory Sales Value</span>
+          <span className="text-lg font-black text-amber-300 mt-1 font-mono">{formatCurrency(inventoryClosingStats.closingInventoryValue)}</span>
+          <span className="text-[9px] text-slate-400 font-bold mt-0.5">Today's Sales + Damage Return</span>
+          <div className="mt-2 bg-amber-500/15 border border-amber-500/30 rounded-lg p-1.5 text-[8.5px] text-amber-300 font-bold leading-relaxed">
+            ⚠️ ড্যামেজ রিটার্ন স্টকে থেকে যায় এবং এটি আপনার মুনাফায় (Profit) কোনো প্রভাব ফেলে না।
+          </div>
+        </div>
+      </div>
 
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>

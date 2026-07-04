@@ -8,7 +8,8 @@ import {
   deleteDoc, 
   doc,
   serverTimestamp,
-  where
+  where,
+  setDoc
 } from "firebase/firestore";
 import { db, auth } from "../lib/firebase";
 import toast from "react-hot-toast";
@@ -208,13 +209,7 @@ export function useCollection<T>(collectionName: string) {
         return;
     }
     
-    // Check if we are ready to fetch
-    // Only block if we are NOT in demo mode, NOT in a system collection, AND we don't have a companyId.
     const isDemoMode = localStorage.getItem("demo_user_session") !== null;
-    if (!isDemoMode && !auth.currentUser) {
-       setLoading(false);
-       return;
-    }
 
     if (!isDemoMode && !isSystemCollection && !companyId) {
       console.log("Collection fetch waiting for companyId:", {
@@ -258,7 +253,14 @@ export function useCollection<T>(collectionName: string) {
       };
     }
 
+    let unsubscribeSnap: (() => void) | null = null;
+
     const unsubscribeAuth = auth.onAuthStateChanged((user) => {
+      if (unsubscribeSnap) {
+        unsubscribeSnap();
+        unsubscribeSnap = null;
+      }
+
       if (!user) {
         setData([]);
         setLoading(false);
@@ -278,7 +280,7 @@ export function useCollection<T>(collectionName: string) {
         ? query(collection(db, collectionName))
         : query(collection(db, collectionName), where("companyId", "==", companyId));
       
-      const unsubscribeSnap = onSnapshot(q, { includeMetadataChanges: true }, (snapshot) => {
+      unsubscribeSnap = onSnapshot(q, { includeMetadataChanges: true }, (snapshot) => {
         const items: any[] = [];
         
         // Track the last successful cloud sync time
@@ -334,11 +336,14 @@ export function useCollection<T>(collectionName: string) {
         }
         setLoading(false);
       });
-
-      return () => unsubscribeSnap();
     });
 
-    return () => unsubscribeAuth();
+    return () => {
+      if (unsubscribeSnap) {
+        unsubscribeSnap();
+      }
+      unsubscribeAuth();
+    };
   }, [collectionName, authCounter, companyId, loadingCompany]);
 
 
@@ -455,10 +460,10 @@ export function useCollection<T>(collectionName: string) {
       }
 
       const cleanedItem = cleanUndefined(item);
-      await updateDoc(doc(db, collectionName, id), {
+      await setDoc(doc(db, collectionName, id), {
         ...cleanedItem,
         pending_changes: isOffline,
-      });
+      }, { merge: true });
       if (isOffline) {
         toast.success("অফলাইনে আপডেট সেভ করা হয়েছে (সিঙ্ক পেন্ডিং)");
       } else {

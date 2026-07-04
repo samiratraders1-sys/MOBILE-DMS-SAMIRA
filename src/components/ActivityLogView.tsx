@@ -1,23 +1,27 @@
 import React, { useState, useMemo } from "react";
 import { 
   FileText, Search, Trash2, Calendar, ShieldCheck, CheckCircle2, 
-  XCircle, Filter, Download, User, ArrowDownAz, RefreshCw, AlertCircle
+  XCircle, Filter, Download, User, ArrowDownAz, RefreshCw, AlertCircle,
+  Mic
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { useConfirm } from "../context/ConfirmContext";
+import VoiceNoteRecorder from "./VoiceNoteRecorder";
 
 interface ActivityLogProps {
   logs: any[];
   onClearLogs?: () => Promise<void>;
   role: string;
   userEmail: string;
+  onUpdateLog?: (id: string, data: any) => Promise<void>;
 }
 
-export default function ActivityLogView({ logs, onClearLogs, role, userEmail }: ActivityLogProps) {
+export default function ActivityLogView({ logs, onClearLogs, role, userEmail, onUpdateLog }: ActivityLogProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedType, setSelectedType] = useState<"all" | "delete" | "approve" | "reject" | "inventory">("all");
   const [selectedUser, setSelectedUser] = useState<string>("all");
   const [clearing, setClearing] = useState(false);
+  const [activeRecordingLogId, setActiveRecordingLogId] = useState<string | null>(null);
   const { confirmDelete } = useConfirm();
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -462,6 +466,7 @@ export default function ActivityLogView({ logs, onClearLogs, role, userEmail }: 
                     <th className="p-4 w-52">কর্তা (Operator User)</th>
                     <th className="p-4 w-32">ধরণ</th>
                     <th className="p-4">কার্যকর বিবরণ (Audit Details)</th>
+                    <th className="p-4 w-64">ভয়েস নোট (Voice Note)</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
@@ -489,6 +494,50 @@ export default function ActivityLogView({ logs, onClearLogs, role, userEmail }: 
                       <td className="p-4 leading-normal font-bold text-slate-900">
                         {log.details}
                       </td>
+                      <td className="p-4">
+                        {log.voiceNote ? (
+                          <div className="flex items-center gap-2">
+                            <VoiceNoteRecorder existingAudio={log.voiceNote} readOnly={true} />
+                            <button
+                              onClick={async () => {
+                                if (onUpdateLog) {
+                                  await onUpdateLog(log.id, { voiceNote: null });
+                                  toast.success("ভয়েস নোট মুছে ফেলা হয়েছে");
+                                }
+                              }}
+                              className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg transition-all cursor-pointer"
+                              title="মুছে ফেলুন"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ) : activeRecordingLogId === log.id ? (
+                          <div className="flex items-center gap-2 max-w-[285px]">
+                            <VoiceNoteRecorder 
+                              onRecordingComplete={async (base64) => {
+                                if (onUpdateLog && base64) {
+                                  await onUpdateLog(log.id, { voiceNote: base64 });
+                                  toast.success("ভয়েস নোট সফলভাবে যুক্ত হয়েছে!");
+                                }
+                                setActiveRecordingLogId(null);
+                              }}
+                            />
+                            <button
+                              onClick={() => setActiveRecordingLogId(null)}
+                              className="p-1 text-xs text-rose-500 font-bold border border-rose-200 rounded-lg bg-rose-50 hover:bg-rose-100 px-2 cursor-pointer font-sans"
+                            >
+                              বাতিল
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => setActiveRecordingLogId(log.id)}
+                            className="flex items-center gap-1.5 p-1.5 px-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl text-[10px] font-extrabold transition-all cursor-pointer font-sans"
+                          >
+                            <Mic className="w-3.5 h-3.5" /> রেকর্ড ভয়েস নোট
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -509,9 +558,56 @@ export default function ActivityLogView({ logs, onClearLogs, role, userEmail }: 
                   </div>
                   <div>
                     <span className="block text-xs font-black text-slate-900 leading-normal mb-1">{log.details}</span>
-                    <div className="flex items-center gap-1 text-[9px] text-slate-450 font-bold bg-slate-50 p-2 rounded-xl border border-dashed border-slate-100">
-                      <User className="w-3.5 h-3.5 text-slate-400" />
-                      <span className="truncate">{log.userEmail}</span>
+                    <div className="flex flex-col gap-2 mt-2">
+                      <div className="flex items-center gap-1 text-[9px] text-slate-450 font-bold bg-slate-50 p-2 rounded-xl border border-dashed border-slate-100">
+                        <User className="w-3.5 h-3.5 text-slate-400" />
+                        <span className="truncate">{log.userEmail}</span>
+                      </div>
+                      
+                      {/* Mobile Voice Note Widget */}
+                      <div className="bg-slate-50/50 p-2 rounded-xl border border-dashed border-slate-200 mt-1">
+                        {log.voiceNote ? (
+                          <div className="flex items-center justify-between gap-2">
+                            <VoiceNoteRecorder existingAudio={log.voiceNote} readOnly={true} />
+                            <button
+                              onClick={async () => {
+                                if (onUpdateLog) {
+                                  await onUpdateLog(log.id, { voiceNote: null });
+                                  toast.success("ভয়েস নোট মুছে ফেলা হয়েছে");
+                                }
+                              }}
+                              className="p-2 bg-rose-50 text-rose-600 rounded-lg cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ) : activeRecordingLogId === log.id ? (
+                          <div className="space-y-2">
+                            <VoiceNoteRecorder 
+                              onRecordingComplete={async (base64) => {
+                                if (onUpdateLog && base64) {
+                                  await onUpdateLog(log.id, { voiceNote: base64 });
+                                  toast.success("ভয়েস নোট সফলভাবে যুক্ত হয়েছে!");
+                                }
+                                setActiveRecordingLogId(null);
+                              }}
+                            />
+                            <button
+                              onClick={() => setActiveRecordingLogId(null)}
+                              className="w-full text-center py-1.5 text-xs text-rose-500 font-bold border border-rose-200 rounded-xl bg-rose-50 cursor-pointer font-sans"
+                            >
+                              বাতিল করুন
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => setActiveRecordingLogId(log.id)}
+                            className="flex items-center justify-center gap-1.5 w-full p-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl text-xs font-bold transition-all cursor-pointer font-sans"
+                          >
+                            <Mic className="w-4 h-4" /> ভয়েস নোট রেকর্ড করুন
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>

@@ -18,6 +18,7 @@ import { formatCurrency } from "../lib/utils";
 import { toFloat } from "../lib/math";
 import toast from "react-hot-toast";
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from "recharts";
+import VoiceNoteRecorder from "./VoiceNoteRecorder";
 
 const CHART_COLORS = ["#4F46E5", "#06B6D4", "#10B981", "#F59E0B", "#EC4899", "#8B5CF6"];
 const TYPE_COLORS: Record<string, string> = {
@@ -40,6 +41,7 @@ interface FinanceProps {
   updateTransfer: (id: string, t: any) => Promise<void>;
   role?: string;
   user?: any;
+  addExpense?: (e: any) => Promise<void>;
   
   // Dynamic accounts collection
   accounts: any[];
@@ -67,9 +69,11 @@ export default function FinanceView({
   addAccount,
   updateAccount,
   removeAccount,
+  addExpense,
   incomeCategories = []
 }: FinanceProps) {
   const [showAdd, setShowAdd] = useState(false);
+  const [voiceNote, setVoiceNote] = useState<string | null>(null);
   const [showAddAccount, setShowAddAccount] = useState(false);
   const [showBulkPayment, setShowBulkPayment] = useState(false);
   const [showTransferModal, setShowTransferModal] = useState(false);
@@ -238,13 +242,39 @@ export default function FinanceView({
       accountId: accountId,
       createdBy: user?.email || "",
       approved: !isManager,
-      status: isManager ? "pending_approval" : "approved"
+      status: isManager ? "pending_approval" : "approved",
+      voiceNote: voiceNote || null
     };
 
     try {
       setIsSubmittingTransaction(true);
       await addPayment(data);
+
+      // Route general expense data to shared expenses collection
+      if (addExpense && data.type === "out" && data.category !== "Supplier Payment" && data.category !== "সাপ্লায়ার পেমেন্ট") {
+        let expenseSource: "DSR" | "Manager" | "Office" | "Salary" = "Manager";
+        const cat = (data.category || "").toLowerCase();
+        if (cat.includes("salary") || cat.includes("বেতন") || cat.includes("পারিশ্রমিক")) {
+          expenseSource = "Salary";
+        } else if (cat.includes("office") || cat.includes("অফিস") || cat.includes("বাজার") || cat.includes("ভাড়া") || cat.includes("rent")) {
+          expenseSource = "Office";
+        } else if (cat.includes("dsr") || cat.includes("ডেলিভারি") || cat.includes("রুট")) {
+          expenseSource = "DSR";
+        }
+
+        await addExpense({
+          date: data.date,
+          amount: data.amount,
+          source: expenseSource,
+          category: data.category,
+          description: data.description || "Finance Expense Entry",
+          refId: "",
+          approved: data.approved
+        });
+      }
+
       setShowAdd(false);
+      setVoiceNote(null);
       toast.success(isManager ? "পেমেন্ট সফলভাবে এন্ট্রি হয়েছে এবং অনুমোদনের জন্য দিনশেষে রিপোর্টে পাঠানো হয়েছে!" : "পেমেন্ট সফলভাবে এন্ট্রি হয়েছে!");
     } catch (err: any) {
       toast.error("ভুল হয়েছে: " + err.message);
@@ -690,6 +720,11 @@ export default function FinanceView({
                      <h4 className="font-extrabold text-gray-900 text-[15px]">{p.description}</h4>
                      <p className="text-xs text-indigo-650 font-bold mt-1">খাত: {p.category}</p>
                      <p className="text-[11px] text-gray-500 font-semibold mt-1">হিসাব: {accName} | মাধ্যম: {p.method}</p>
+                     {p.voiceNote && (
+                       <div className="mt-3">
+                         <VoiceNoteRecorder existingAudio={p.voiceNote} readOnly={true} />
+                       </div>
+                     )}
                   </div>
                 </div>
                 <div className="flex justify-between items-center border-t pt-4 mt-4">
@@ -902,8 +937,14 @@ export default function FinanceView({
                         </select>
                      </div>
                   </div>
+                  <div className="col-span-2 mt-2">
+                     <VoiceNoteRecorder 
+                        onRecordingComplete={(base64) => setVoiceNote(base64)} 
+                        existingAudio={voiceNote}
+                     />
+                  </div>
                   <div className="flex gap-4 pt-4 border-t mt-6">
-                     <button type="button" onClick={() => setShowAdd(false)} className="flex-1 border py-3.5 rounded-2xl text-xs font-bold cursor-pointer">বাতিল</button>
+                     <button type="button" onClick={() => { setShowAdd(false); setVoiceNote(null); }} className="flex-1 border py-3.5 rounded-2xl text-xs font-bold cursor-pointer">বাতিল</button>
                      <button type="submit" className="flex-1 bg-black text-white py-3.5 rounded-2xl text-xs font-bold cursor-pointer">সেভ করুন</button>
                   </div>
               </form>

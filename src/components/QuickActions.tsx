@@ -556,19 +556,35 @@ export default function QuickActions({
         </div>
       )}
 
-      {/* Primary Floating Action Button */}
-      <button
-        id="quick-actions-fab"
-        onClick={() => setIsOpen(!isOpen)}
-        className="w-14 h-14 bg-black hover:bg-gray-900 text-white rounded-full flex items-center justify-center shadow-2xl transition-all active:scale-95 duration-200 cursor-pointer border border-neutral-800 select-none flex-shrink-0"
-        title="কুইক অ্যাকশন মেনু"
-      >
-        <Plus
-          className={`w-6 h-6 transition-transform duration-300 ${
-            isOpen ? "rotate-45 text-amber-400" : ""
-          }`}
-        />
-      </button>
+      {/* Buttons container */}
+      <div className="flex items-center gap-3">
+        {/* Direct Quick Sale Button */}
+        <button
+          onClick={() => {
+            setActiveModal("sale");
+            setIsOpen(false);
+          }}
+          className="h-14 px-5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-full flex items-center gap-2 shadow-2xl transition-all active:scale-95 duration-200 cursor-pointer border border-emerald-500 select-none"
+          title="কুইক সেল (Quick Sale)"
+        >
+          <ShoppingBag className="w-4 h-4 animate-bounce" />
+          <span>কুইক সেল (Quick Sale)</span>
+        </button>
+
+        {/* Primary Floating Action Button */}
+        <button
+          id="quick-actions-fab"
+          onClick={() => setIsOpen(!isOpen)}
+          className="w-14 h-14 bg-black hover:bg-gray-900 text-white rounded-full flex items-center justify-center shadow-2xl transition-all active:scale-95 duration-200 cursor-pointer border border-neutral-800 select-none flex-shrink-0"
+          title="কুইক অ্যাকশন মেনু"
+        >
+          <Plus
+            className={`w-6 h-6 transition-transform duration-300 ${
+              isOpen ? "rotate-45 text-amber-400" : ""
+            }`}
+          />
+        </button>
+      </div>
 
       {/* ----------------------------------------------------
           --- MODAL 1: POS QUICK CASH SALE ---

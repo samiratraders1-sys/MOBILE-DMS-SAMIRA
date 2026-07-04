@@ -132,10 +132,9 @@ export default function Sidebar({ active, setActive, user, role, roles, onLogout
       items: [
         { id: "ledger", label: "লেজার ও স্টেটমেন্ট", icon: BarChart3 },
         { id: "finance", label: "ফিন্যান্স ও পেমেন্ট", icon: DollarSign },
-        { id: "payment-history", label: "পেমেন্ট লেনদেন খতিয়ান", icon: ListFilter },
-        { id: "daily-cash-book", label: "দৈনিক ক্যাশ বুক", icon: BookOpen },
-        { id: "pnl", label: "লাভ-ক্ষতি রিপোর্ট", icon: TrendingUp },
         { id: "subdb", label: "সাব-ডিবি ডিস্ট্রিবিউশন", icon: TruckIcon },
+        { id: "expense-ledger", label: "ব্যয় খতিয়ান (Expenses)", icon: DollarSign },
+        { id: "supplier-claims", label: "সাপ্লায়ার ক্লেম (Claims)", icon: ClipboardList },
       ]
     },
     {

@@ -11,7 +11,7 @@ import { toast, Toaster } from "react-hot-toast";
 import { Menu, X, LayoutDashboard, Package, FileText, ShoppingCart, Users, Truck, LogIn, Wifi, WifiOff, Smartphone, Plus, Trash2, Loader2, Sparkles, DollarSign, Wallet, ShoppingBag, Keyboard } from "lucide-react";
 import { snapshotAll } from "./lib/snapshot";
 import { useLanguage } from "./context/LanguageContext";
-import { performAppStorageCleanup } from "./lib/cleanup";
+import { performAppStorageCleanup, APP_VERSION } from "./lib/cleanup";
 import { calculateLedger } from "./utils/ledgerCalculator";
 
 
@@ -53,6 +53,8 @@ import DMSEnterpriseView from "./components/DMSEnterpriseView";
 import EnterpriseSuitesView from "./components/EnterpriseSuitesView";
 import DeliveryRouteView from "./components/DeliveryRouteView";
 import SuperAdminView from "./components/SuperAdminView";
+import ExpenseLedgerView from "./components/ExpenseLedgerView";
+import SupplierClaimsView from "./components/SupplierClaimsView";
 
 import { useCollection } from "./hooks/useCollection";
 import { RolePermissions } from "./lib/permissions";
@@ -64,6 +66,105 @@ export default function App() {
   useEffect(() => {
     performAppStorageCleanup();
   }, []);
+
+  // Periodically check for application updates and show a subtle toast
+  useEffect(() => {
+    let updateFound = false;
+
+    const showUpdateToast = (newVersion: string) => {
+      if (updateFound) return;
+      updateFound = true;
+
+      toast((t) => (
+        <div className="flex flex-col gap-2 p-1" style={{ minWidth: "260px" }}>
+          <div className="flex items-start gap-2.5">
+            <span className="text-xl">✨</span>
+            <div className="flex-1">
+              <p className="font-semibold text-sm text-slate-900 dark:text-white">
+                {language === "bn" ? "নতুন আপডেট পাওয়া গেছে!" : "New Update Available!"}
+              </p>
+              <p className="text-xs text-slate-500 dark:text-slate-300 mt-0.5 leading-relaxed">
+                {language === "bn" 
+                  ? `ভার্সন v${newVersion} এখন সহজলভ্য। সর্বশেষ ফিচার পেতে রিফ্রেশ করুন।` 
+                  : `Version v${newVersion} is available. Please refresh to get the latest fixes & features.`}
+              </p>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 mt-1">
+            <button
+              onClick={() => toast.dismiss(t.id)}
+              className="px-2.5 py-1 text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition"
+            >
+              {language === "bn" ? "পরে" : "Later"}
+            </button>
+            <button
+              onClick={() => {
+                toast.dismiss(t.id);
+                window.location.reload();
+              }}
+              className="bg-indigo-600 text-white px-3 py-1 text-xs font-semibold rounded-md shadow-sm hover:bg-indigo-500 active:bg-indigo-700 transition"
+            >
+              {language === "bn" ? "রিফ্রেশ" : "Refresh"}
+            </button>
+          </div>
+        </div>
+      ), {
+        duration: Infinity,
+        id: "app-update-notification",
+      });
+    };
+
+    const checkForUpdates = async () => {
+      try {
+        const res = await fetch("/sw.js", { cache: "no-store" });
+        if (!res.ok) return;
+        const text = await res.text();
+        const match = text.match(/CACHE_NAME\s*=\s*['"]samira-traders-v([^'"]+)['"]/);
+        if (match && match[1]) {
+          const serverVersion = match[1];
+          if (serverVersion !== APP_VERSION) {
+            showUpdateToast(serverVersion);
+          }
+        }
+      } catch (err) {
+        console.debug("Update check skipped/failed:", err);
+      }
+    };
+
+    // 1. Initial check after a short delay
+    const initialCheck = setTimeout(checkForUpdates, 3000);
+
+    // 2. Poll for updates every 3 minutes
+    const interval = setInterval(checkForUpdates, 3 * 60 * 1000);
+
+    // 3. Listen for native service worker updates
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.getRegistration().then((reg) => {
+        if (!reg) return;
+        
+        // If there's already a waiting service worker
+        if (reg.waiting) {
+          checkForUpdates(); // verify and show toast
+        }
+
+        // On update found
+        reg.onupdatefound = () => {
+          const installingWorker = reg.installing;
+          if (!installingWorker) return;
+          installingWorker.onstatechange = () => {
+            if (installingWorker.state === "installed" && navigator.serviceWorker.controller) {
+              checkForUpdates();
+            }
+          };
+        };
+      });
+    }
+
+    return () => {
+      clearTimeout(initialCheck);
+      clearInterval(interval);
+    };
+  }, [language]);
 
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -221,6 +322,8 @@ export default function App() {
   const returns = useCollection<any>("returns");
   const activityLogs = useCollection<any>("activity_logs");
   const transactions = useCollection<any>("transactions");
+  const expenses = useCollection<any>("expenses");
+  const supplierClaims = useCollection<any>("supplierClaims");
 
   // Dynamically calculate non-drifted customer/supplier balances on the fly
   const enrichedCustomers = useMemo(() => {
@@ -573,6 +676,59 @@ export default function App() {
       }
     }
 
+    // 3.5. Discrepancy (short) handling: flag short as Manager Salary Advances and Recoverable Debt
+    const shortVal = Number(summ.dsrBalance || 0);
+    if (shortVal < 0) {
+      const shortAmount = Math.abs(shortVal);
+      const dsrObj = staff.data.find(s => s.id === summ.dsrId);
+      if (dsrObj) {
+        const basicSalary = Number(dsrObj.salary || dsrObj.Salary || 12000);
+        const advanceAmount = Math.min(shortAmount, basicSalary);
+        const debtAmount = shortAmount > basicSalary ? shortAmount - basicSalary : 0;
+
+        if (advanceAmount > 0) {
+          await payments.add({
+            date: summ.settlementDate || summ.date || new Date().toISOString().split('T')[0],
+            type: "out",
+            amount: advanceAmount,
+            category: "Manager Salary Advance",
+            description: `হিসাবের শর্ট সমন্বয় ও অগ্রিম বেতন (Short Balance Salary Advance) - রুট বিল #${summ.id.slice(-4).toUpperCase()}`,
+            entityId: summ.dsrId,
+            method: "Adjustment",
+            accountId: "cash",
+            status: "approved",
+            approved: true,
+            createdBy: "System",
+            createdAt: new Date().toISOString(),
+            refId: summ.id
+          });
+        }
+
+        if (debtAmount > 0) {
+          await payments.add({
+            date: summ.settlementDate || summ.date || new Date().toISOString().split('T')[0],
+            type: "out",
+            amount: debtAmount,
+            category: "Recoverable Debt",
+            description: `অতিরিক্ত শর্ট রিকভারেবল ডেট (Recoverable Debt - Short exceeds Salary) - রুট বিল #${summ.id.slice(-4).toUpperCase()}`,
+            entityId: summ.dsrId,
+            method: "Adjustment",
+            accountId: "cash",
+            status: "approved",
+            approved: true,
+            createdBy: "System",
+            createdAt: new Date().toISOString(),
+            refId: summ.id
+          });
+        }
+
+        // Subtract from staff balance (debt increases on company's assets / they owe us)
+        await staff.update(dsrObj.id, {
+          balance: (Number(dsrObj.balance) || 0) - shortAmount
+        });
+      }
+    }
+
     // 4. Update Summary record status to settled and approved
     await summaries.update(summaryId, {
       status: "settled",
@@ -814,6 +970,8 @@ export default function App() {
             sales={sales.data}
             activityLogs={activityLogs.data}
             subDbs={subDbs.data}
+            subDbShipments={subDbShipments.data}
+            expenses={expenses.data}
             setActiveView={setActiveView} 
             role={role}
             allowedViews={role === 'admin' ? (RolePermissions as any).admin.allowedViews : (roleData?.allowedViews || (RolePermissions as any)[role]?.allowedViews || [])}
@@ -868,6 +1026,8 @@ export default function App() {
             suppliers={suppliers.data}
             summaries={summaries.data}
             purchases={purchases.data}
+            sales={sales.data}
+            damageInventory={damageInventory.data}
             role={role}
             stockAdjustments={stockAdjustments}
             user={user}
@@ -954,6 +1114,7 @@ export default function App() {
             updateCustomer={customers.update}
             updateProduct={products.update}
             role={role}
+            addExpense={async (e) => { await expenses.add(e); }}
           />
         );
       case "dsr-portal":
@@ -1000,6 +1161,9 @@ export default function App() {
             addCustomer={async (item) => { await customers.add(item); }}
             updateCustomer={async (id, item) => { await customers.update(id, item); }}
             removeCustomer={async (id) => { await customers.remove(id); }}
+            sales={sales.data}
+            payments={payments.data}
+            summaries={summaries.data}
           />
         );
       case "supplier-mgmt":
@@ -1043,17 +1207,35 @@ export default function App() {
             payments={payments.data}
             customers={customers.data}
             customerGroups={customerGroups.data}
+            accounts={accounts.data}
+            transfers={transfers.data}
+            subDbShipments={subDbShipments.data}
+            removePayment={payments.remove}
+            role={role}
+            user={user}
+            initialTab="sales"
           />
         );
       case "pnl":
         return (
-          <ProfitLossView 
-             sales={sales.data}
-             purchases={purchases.data}
-             payments={payments.data}
-             summaries={summaries.data}
-             products={products.data}
-             subDbShipments={subDbShipments.data}
+          <ReportsView 
+            summaries={summaries.data} 
+            products={products.data} 
+            suppliers={suppliers.data} 
+            addPayment={payments.add} 
+            staff={staff.data} 
+            sales={sales.data}
+            purchases={purchases.data}
+            payments={payments.data}
+            customers={customers.data}
+            customerGroups={customerGroups.data}
+            accounts={accounts.data}
+            transfers={transfers.data}
+            subDbShipments={subDbShipments.data}
+            removePayment={payments.remove}
+            role={role}
+            user={user}
+            initialTab="pnl"
           />
         );
       case "subdb":
@@ -1101,35 +1283,76 @@ export default function App() {
             addAccount={async (a) => { await accounts.add(a); }}
             updateAccount={accounts.update}
             removeAccount={async (id) => { await accounts.remove(id); }}
+            addExpense={async (e) => { await expenses.add(e); }}
             incomeCategories={incomeCategories.data}
+          />
+        );
+      case "expense-ledger":
+        return (
+          <ExpenseLedgerView
+            expenses={expenses.data}
+            addExpense={async (e) => { await expenses.add(e); }}
+            removeExpense={async (id) => { await expenses.remove(id); }}
+            updateExpense={expenses.update}
+            role={role}
+          />
+        );
+      case "supplier-claims":
+        return (
+          <SupplierClaimsView
+            claims={supplierClaims.data}
+            addClaim={async (c) => { await supplierClaims.add(c); }}
+            updateClaim={supplierClaims.update}
+            removeClaim={async (id) => { await supplierClaims.remove(id); }}
+            suppliers={suppliers.data}
+            products={products.data}
+            addTransaction={async (tx) => { await transactions.add(tx); }}
+            role={role}
+            userEmail={user?.email || ""}
           />
         );
       case "payment-history":
         return (
-          <PaymentHistoryView
+          <ReportsView 
+            summaries={summaries.data} 
+            products={products.data} 
+            suppliers={suppliers.data} 
+            addPayment={payments.add} 
+            staff={staff.data} 
+            sales={sales.data}
+            purchases={purchases.data}
             payments={payments.data}
             customers={customers.data}
-            suppliers={suppliers.data}
-            staff={staff.data}
+            customerGroups={customerGroups.data}
             accounts={accounts.data}
+            transfers={transfers.data}
+            subDbShipments={subDbShipments.data}
             removePayment={payments.remove}
-            addPayment={payments.add}
             role={role}
             user={user}
+            initialTab="payment-history"
           />
         );
       case "daily-cash-book":
         return (
-          <DailyCashBookView
-            accounts={accounts.data}
+          <ReportsView 
+            summaries={summaries.data} 
+            products={products.data} 
+            suppliers={suppliers.data} 
+            addPayment={payments.add} 
+            staff={staff.data} 
+            sales={sales.data}
+            purchases={purchases.data}
             payments={payments.data}
-            transfers={transfers.data}
-            summaries={summaries.data}
             customers={customers.data}
-            suppliers={suppliers.data}
-            staff={staff.data}
+            customerGroups={customerGroups.data}
+            accounts={accounts.data}
+            transfers={transfers.data}
+            subDbShipments={subDbShipments.data}
+            removePayment={payments.remove}
             role={role}
             user={user}
+            initialTab="daily-cash-book"
           />
         );
       case "ledger":
@@ -1144,10 +1367,12 @@ export default function App() {
             products={products.data}
             sales={sales.data}
             transactions={transactions.data}
+            routes={routes.data}
             addCustomer={customers.add}
             updateCustomer={customers.update}
             addSupplier={suppliers.add}
             updateSupplier={suppliers.update}
+            updateStaff={staff.update}
             addPayment={payments.add}
             addSale={sales.add}
             updateProduct={products.update}
@@ -1208,7 +1433,7 @@ export default function App() {
             users={users.data}
             staff={staff.data}
             roles={roles.data}
-            add={async (user) => { await users.add(user); }}
+            add={users.add}
             update={users.update}
             remove={async (id) => { await users.remove(id); }}
             updateRole={roles.update}
@@ -1241,6 +1466,7 @@ export default function App() {
             onClearLogs={onClearLogs}
             role={role}
             userEmail={user?.email || ""}
+            onUpdateLog={async (id, data) => { await activityLogs.update(id, data); }}
           />
         );
       default:
@@ -1256,6 +1482,8 @@ export default function App() {
             sales={sales.data}
             activityLogs={activityLogs.data}
             subDbs={subDbs.data}
+            subDbShipments={subDbShipments.data}
+            expenses={expenses.data}
             setActiveView={setActiveView} 
             role={role}
             allowedViews={role === 'admin' ? (RolePermissions as any).admin.allowedViews : (roleData?.allowedViews || (RolePermissions as any)[role]?.allowedViews || [])}

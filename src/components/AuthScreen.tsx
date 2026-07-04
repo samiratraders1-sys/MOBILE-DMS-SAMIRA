@@ -49,14 +49,14 @@ export default function AuthScreen({ onEnterDemo }: AuthScreenProps) {
 
   const handleEmailLogin = async () => {
     if (!email || !password) {
-      toast.error("অনুগ্রহ করে মোবাইল নম্বর এবং পাসওয়ার্ড দিন");
+      toast.error("অনুগ্রহ করে ইউজারনেম/মোবাইল নম্বর এবং পাসওয়ার্ড দিন");
       return;
     }
     if (isLoading) return;
     setIsLoading(true);
     try {
       // Format phone number to an email structure
-      const formattedEmail = `${email}@samirabms.com`;
+      const formattedEmail = `${email.trim().toLowerCase()}@samirabms.com`;
       await loginWithEmail(formattedEmail, password);
     } catch (error: any) {
       console.error("Email login error:", error);
@@ -94,7 +94,7 @@ export default function AuthScreen({ onEnterDemo }: AuthScreenProps) {
         <div className="space-y-4 mb-6">
             <input
                 type="text"
-                placeholder="মোবাইল নম্বর"
+                placeholder="ইউজারনেম বা মোবাইল নম্বর"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full p-3 border rounded-xl"

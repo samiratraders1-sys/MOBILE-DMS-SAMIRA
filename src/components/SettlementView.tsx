@@ -29,6 +29,7 @@ interface SettlementProps {
   updateCustomer?: (id: string, item: any) => Promise<void>;
   updateProduct?: (id: string, item: any) => Promise<void>;
   addDamage?: (item: any) => Promise<void>;
+  addExpense?: (item: any) => Promise<void>;
   role?: string;
 }
 
@@ -42,6 +43,7 @@ export default function SettlementView({
   updateCustomer, 
   updateProduct, 
   addDamage,
+  addExpense,
   role
 }: SettlementProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -713,6 +715,21 @@ export default function SettlementView({
 
       // Update Summary Status in Firestore
       await updateSummary(activeSummary.id, settlementData);
+
+      // Route DSR expense data to shared expenses collection
+      if (addExpense && expenses && expenses.length > 0) {
+        for (const e of expenses) {
+          await addExpense({
+            date: settlementData.settlementDate,
+            amount: Number(e.amount),
+            source: "DSR",
+            category: e.type,
+            description: `DSR Route Expense (${activeSummary.srName} - ${activeSummary.id})`,
+            refId: activeSummary.id,
+            approved: settlementData.approved
+          });
+        }
+      }
 
       if (isManager) {
         toast.success("রিপোর্টটি সফলভাবে সেভ করা হয়েছে এবং অ্যাডমিন অনুমোদনের জন্য পাঠানো হয়েছে!");

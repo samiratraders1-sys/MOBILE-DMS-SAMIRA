@@ -876,6 +876,23 @@ export default function DSRPortalView({
                 <p className="text-[9px] text-gray-400 font-medium">
                   ব্যালেন্স শূন্য বা পজিটিভ হওয়া বাঞ্ছনীয়।
                 </p>
+
+                {calculations && calculations.balance < 0 && (() => {
+                  const dsrObj = staff.find(s => s.id === selectedDSRId);
+                  const basicSalary = Number(dsrObj?.salary || dsrObj?.Salary || 12000);
+                  const shortAmount = Math.abs(calculations.balance);
+                  const advanceAmount = Math.min(shortAmount, basicSalary);
+                  const debtAmount = shortAmount > basicSalary ? shortAmount - basicSalary : 0;
+                  return (
+                    <div className="mt-3 bg-amber-50 p-3 rounded-xl border border-amber-200 text-[11px] text-amber-900 font-semibold space-y-1 select-none">
+                      <p className="text-amber-950 font-black">⚠️ ঘাটতি (শর্ট) হিসাব সমন্বয়:</p>
+                      <p>• অগ্রিম বেতন (Manager Salary Advance): {formatCurrency(advanceAmount)}</p>
+                      {debtAmount > 0 && (
+                        <p className="text-red-700 font-black">• অতিরিক্ত বকেয়া দায় (Recoverable Debt): {formatCurrency(debtAmount)}</p>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Submit Draft Button */}

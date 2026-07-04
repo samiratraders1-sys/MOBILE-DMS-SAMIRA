@@ -1,11 +1,13 @@
 import React, { useState } from "react";
 import { 
   ShieldCheck, CheckCircle, XCircle, ShoppingBag, 
-  CheckSquare, Landmark, Award, Calendar, RefreshCcw, DollarSign, Loader2 
+  CheckSquare, Landmark, Award, Calendar, RefreshCcw, DollarSign, Loader2, Eye
 } from "lucide-react";
 import { formatCurrency, getGroupColors } from "../lib/utils";
 import toast from "react-hot-toast";
 import { useConfirm } from "../context/ConfirmContext";
+import DailyClosingReportModal from "./DailyClosingReportModal";
+import HistoricalApprovalsModal from "./HistoricalApprovalsModal";
 
 interface AdminApprovalsProps {
   sales: any[];
@@ -53,6 +55,8 @@ export default function AdminApprovalsView({
   const [activeTab, setActiveTab] = useState<"sales" | "settlement" | "payments" | "subdb">("sales");
   const [processingIds, setProcessingIds] = useState<string[]>([]);
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
+  const [selectedClosingReport, setSelectedClosingReport] = useState<any>(null);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
   const { confirmDelete } = useConfirm();
 
   // Reset selection when tab changes
@@ -114,6 +118,68 @@ export default function AdminApprovalsView({
   };
 
   const totalPendingCount = pendingSales.length + pendingSettlements.length + pendingPayments.length + pendingSubDbs.length;
+
+  const renderBulkActionBar = () => {
+    const items = getPendingItems();
+    if (items.length === 0) return null;
+
+    const allSelected = items.length > 0 && selectedItems.length === items.length;
+    const isAnySelected = selectedItems.length > 0;
+    const isBulkProcessing = processingIds.some(id => selectedItems.includes(id));
+
+    return (
+      <div className="bg-indigo-50/40 border border-indigo-100 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4 transition-all">
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-3 cursor-pointer select-none font-bold text-gray-700 text-sm">
+            <input 
+              type="checkbox" 
+              checked={allSelected} 
+              disabled={isBulkProcessing}
+              onChange={() => {
+                if (allSelected) {
+                  setSelectedItems([]);
+                } else {
+                  setSelectedItems(items.map(item => item.id));
+                }
+              }}
+              className="w-5 h-5 text-indigo-600 border-indigo-300 rounded focus:ring-indigo-500 cursor-pointer disabled:opacity-50"
+            />
+            <span className="text-gray-800">সব নির্বাচন করুন ({items.length} টির মধ্যে {selectedItems.length} টি সিলেক্টেড)</span>
+          </label>
+        </div>
+        
+        {isAnySelected && (
+          <div className="flex items-center gap-2.5">
+            <button
+              onClick={() => handleBulkAction('reject')}
+              disabled={isBulkProcessing}
+              className="px-4 py-2 border border-red-250 hover:bg-red-50 text-red-650 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+            >
+              <XCircle className="w-4 h-4 text-red-600" />
+              একসাথে নাকচ করুন ({selectedItems.length})
+            </button>
+            <button
+              onClick={() => handleBulkAction('approve')}
+              disabled={isBulkProcessing}
+              className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-black rounded-xl text-xs flex items-center gap-1.5 transition-all shadow-sm hover:shadow disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+            >
+              {isBulkProcessing ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  অনুমোদন হচ্ছে...
+                </>
+              ) : (
+                <>
+                  <CheckCircle className="w-4 h-4" />
+                  একসাথে অনুমোদন করুন ({selectedItems.length})
+                </>
+              )}
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const handleApproveSubDb = async (id: string) => {
     if (processingIds.includes(id)) return;
@@ -247,7 +313,13 @@ export default function AdminApprovalsView({
               ম্যানেজারের মাধ্যমে দিনশেষে সম্পন্ন সকল ট্রানজেকশন (হিসাব নিকাশ, নতুন বিক্রয় ও ক্যাশ ট্রান্সফার) যাচাই এবং চূড়ান্ত অনুমোদন করুন। আপনার অনুমোদনের পরেই এগুলো স্টক ও ফাইনাল লেজারে যোগ হবে।
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 items-center">
+            <button
+              onClick={() => setShowHistoryModal(true)}
+              className="px-4 py-3 bg-indigo-950 text-indigo-300 hover:bg-indigo-900 rounded-2xl border border-indigo-800 font-black text-xs uppercase flex items-center gap-2 shadow-sm transition-all cursor-pointer"
+            >
+              <Eye className="w-4 h-4" /> অনুমোদন ইতিহাস (View History)
+            </button>
             <span className="p-3.5 bg-slate-800 text-indigo-400 rounded-2xl border border-slate-700 font-bold text-xs uppercase flex items-center gap-1.5 leading-none shrink-0">
               <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 animate-ping" />
               পেন্ডিং এন্ট্রি: {totalPendingCount} টি
@@ -310,22 +382,8 @@ export default function AdminApprovalsView({
         {/* Tab 1: Sales Approvals */}
         {activeTab === "sales" && (
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="font-extrabold text-gray-900 mb-2">পেন্ডিং সেলস (POS) যাচাইকরণ</h3>
-              {pendingSales.length > 0 && (
-                <div className="flex items-center gap-3">
-                  <label className="flex items-center gap-2 text-xs font-bold text-gray-600">
-                    <input type="checkbox" checked={selectedItems.length === pendingSales.length && pendingSales.length > 0} onChange={() => setSelectedItems(selectedItems.length === pendingSales.length ? [] : pendingSales.map(s => s.id))} /> সব সিলেক্ট করুন
-                  </label>
-                  {selectedItems.length > 0 && (
-                    <>
-                      <button onClick={() => handleBulkAction('reject')} className="text-xs font-black text-red-600">নাকচ ({selectedItems.length})</button>
-                      <button onClick={() => handleBulkAction('approve')} className="text-xs font-black text-green-600">অনুমোদন ({selectedItems.length})</button>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
+            <h3 className="font-extrabold text-gray-900 mb-2">পেন্ডিং সেলস (POS) যাচাইকরণ</h3>
+            {renderBulkActionBar()}
             
             {pendingSales.length === 0 ? (
               <div className="text-center py-16 text-gray-400 font-semibold border-2 border-dashed rounded-2xl">
@@ -413,22 +471,8 @@ export default function AdminApprovalsView({
         {/* Tab 2: Settlement Approvals */}
         {activeTab === "settlement" && (
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="font-extrabold text-gray-900 mb-2">পেন্ডিং বিকেলে DSR সেটেলমেন্ট বিবরণী</h3>
-              {pendingSettlements.length > 0 && (
-                <div className="flex items-center gap-3">
-                  <label className="flex items-center gap-2 text-xs font-bold text-gray-600">
-                    <input type="checkbox" checked={selectedItems.length === pendingSettlements.length && pendingSettlements.length > 0} onChange={() => setSelectedItems(selectedItems.length === pendingSettlements.length ? [] : pendingSettlements.map(s => s.id))} /> সব সিলেক্ট করুন
-                  </label>
-                  {selectedItems.length > 0 && (
-                    <>
-                      <button onClick={() => handleBulkAction('reject')} className="text-xs font-black text-red-600">নাকচ ({selectedItems.length})</button>
-                      <button onClick={() => handleBulkAction('approve')} className="text-xs font-black text-green-600">অনুমোদন ({selectedItems.length})</button>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
+            <h3 className="font-extrabold text-gray-900 mb-2">পেন্ডিং বিকেলে DSR সেটেলমেন্ট বিবরণী</h3>
+            {renderBulkActionBar()}
 
             {pendingSettlements.length === 0 ? (
               <div className="text-center py-16 text-gray-400 font-semibold border-2 border-dashed rounded-2xl">
@@ -525,6 +569,12 @@ export default function AdminApprovalsView({
 
                       <div className="flex justify-end gap-3.5">
                         <button 
+                          onClick={() => setSelectedClosingReport(summ)}
+                          className="py-2.5 px-5 border border-indigo-200 hover:bg-indigo-50 text-indigo-700 font-extrabold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-all"
+                        >
+                          <Eye className="w-4.5 h-4.5" /> ক্লোজিং রিপোর্ট দেখুন
+                        </button>
+                        <button 
                           disabled={processingIds.includes(summ.id)}
                           onClick={() => handleRejectSettlement(summ.id)}
                           className="py-2.5 px-6 border border-red-200 hover:bg-red-50 text-red-600 font-bold rounded-xl text-xs flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
@@ -558,22 +608,8 @@ export default function AdminApprovalsView({
         {/* Tab 3: Payments to Admin, Expenses & Collections */}
         {activeTab === "payments" && (
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="font-extrabold text-gray-900 mb-2">পেন্ডিং সাপ্লায়ার পেমেন্ট, খরচ ও এডমিন ক্যাশ ট্রান্সফার তালিকা</h3>
-              {pendingPayments.length > 0 && (
-                <div className="flex items-center gap-3">
-                  <label className="flex items-center gap-2 text-xs font-bold text-gray-600">
-                    <input type="checkbox" checked={selectedItems.length === pendingPayments.length && pendingPayments.length > 0} onChange={() => setSelectedItems(selectedItems.length === pendingPayments.length ? [] : pendingPayments.map(p => p.id))} /> সব সিলেক্ট করুন
-                  </label>
-                  {selectedItems.length > 0 && (
-                    <>
-                      <button onClick={() => handleBulkAction('reject')} className="text-xs font-black text-red-600">নাকচ ({selectedItems.length})</button>
-                      <button onClick={() => handleBulkAction('approve')} className="text-xs font-black text-green-600">অনুমোদন ({selectedItems.length})</button>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
+            <h3 className="font-extrabold text-gray-900 mb-2">পেন্ডিং সাপ্লায়ার পেমেন্ট, খরচ ও এডমিন ক্যাশ ট্রান্সফার তালিকা</h3>
+            {renderBulkActionBar()}
 
             {pendingPayments.length === 0 ? (
               <div className="text-center py-16 text-gray-400 font-semibold border-2 border-dashed rounded-2xl">
@@ -664,22 +700,8 @@ export default function AdminApprovalsView({
         {/* Tab 4: Sub-DB Approvals */}
         {activeTab === "subdb" && (
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="font-extrabold text-gray-900 mb-2">পেন্ডিং সাব-ডিবি বিতরণকারী পয়েন্ট যাচাই ও অনুমোদন</h3>
-              {pendingSubDbs.length > 0 && (
-                <div className="flex items-center gap-3">
-                  <label className="flex items-center gap-2 text-xs font-bold text-gray-600">
-                    <input type="checkbox" checked={selectedItems.length === pendingSubDbs.length && pendingSubDbs.length > 0} onChange={() => setSelectedItems(selectedItems.length === pendingSubDbs.length ? [] : pendingSubDbs.map(s => s.id))} /> সব সিলেক্ট করুন
-                  </label>
-                  {selectedItems.length > 0 && (
-                    <>
-                      <button onClick={() => handleBulkAction('reject')} className="text-xs font-black text-red-600">নাকচ ({selectedItems.length})</button>
-                      <button onClick={() => handleBulkAction('approve')} className="text-xs font-black text-green-600">অনুমোদন ({selectedItems.length})</button>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
+            <h3 className="font-extrabold text-gray-900 mb-2">পেন্ডিং সাব-ডিবি বিতরণকারী পয়েন্ট যাচাই ও অনুমোদন</h3>
+            {renderBulkActionBar()}
             
             {pendingSubDbs.length === 0 ? (
               <div className="text-center py-16 text-gray-400 font-semibold border-2 border-dashed rounded-2xl">
@@ -755,6 +777,29 @@ export default function AdminApprovalsView({
         )}
 
       </div>
+
+      <DailyClosingReportModal
+        isOpen={!!selectedClosingReport}
+        onClose={() => setSelectedClosingReport(null)}
+        summary={selectedClosingReport}
+        products={products}
+        staff={staff}
+        routes={routes}
+        customers={customers}
+        suppliers={suppliers}
+      />
+
+      <HistoricalApprovalsModal
+        isOpen={showHistoryModal}
+        onClose={() => setShowHistoryModal(false)}
+        sales={sales}
+        summaries={summaries}
+        payments={payments}
+        customers={customers}
+        staff={staff}
+        suppliers={suppliers}
+        routes={routes}
+      />
     </div>
   );
 }

@@ -2,8 +2,8 @@ import { Users, Database, ShoppingCart, Package, TrendingUp, RefreshCw, FileText
 import { motion } from "motion/react";
 
 const menuItems = [
-  { name: "Customers Management", label: "কাস্টমার ম্যানেজমেন্ট", icon: Users, view: "customers" },
-  { name: "Suppliers Management", label: "সাপ্লায়ার ম্যানেজমেন্ট", icon: Database, view: "suppliers" },
+  { name: "Customers Management", label: "কাস্টমার ম্যানেজমেন্ট", icon: Users, view: "customer-mgmt" },
+  { name: "Suppliers Management", label: "সাপ্লায়ার ম্যানেজমেন্ট", icon: Database, view: "supplier-mgmt" },
   { name: "Purchase Management", label: "পারচেজ ম্যানেজমেন্ট", icon: ShoppingCart, view: "purchase" },
   { name: "Stock Management", label: "স্টক ম্যানেজমেন্ট", icon: Package, view: "inventory" },
   { name: "Sales Management", label: "সেলস ম্যানেজমেন্ট", icon: TrendingUp, view: "sales" },
