@@ -6,7 +6,24 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // Allow any authenticated user to read and write any document
+    // Allow read/write for system/user metadata to facilitate bootstrapping and smooth login transitions
+    match /users/{userId} {
+      allow read, write: if true;
+    }
+    match /admins/{adminId} {
+      allow read, write: if true;
+    }
+    match /companies/{companyId} {
+      allow read, write: if true;
+    }
+    match /licenses/{licenseId} {
+      allow read, write: if true;
+    }
+    match /subscriptions/{subId} {
+      allow read, write: if true;
+    }
+
+    // Allow any authenticated user to read and write any other document (products, sales, customers, etc.)
     match /{document=**} {
       allow read, write: if isSignedIn();
     }

@@ -1482,7 +1482,7 @@ export default function LedgerView({
                   <FileText className="w-3.5 h-3.5 text-slate-450" /> হিসাব খতিয়ান রিপোর্ট
                 </button>
 
-                {(selectedPartyObj?.type === "customer" || selectedPartyObj?.type === "staff") && (
+                {(selectedPartyObj?.type === "customer" || selectedPartyObj?.type === "staff" || selectedPartyObj?.type === "supplier") && (
                   <button 
                     onClick={() => setShowHistoryModal(true)}
                     className="flex items-center gap-1.5 px-3 py-1 bg-indigo-50 border border-indigo-200 rounded-full text-xs font-bold text-indigo-700 shadow-xs hover:bg-indigo-100 cursor-pointer animate-all duration-200"

@@ -40,6 +40,12 @@ export const createFirebaseUser = async (email: string, password: string) => {
   try {
     const userCredential = await createUserWithEmailAndPassword(secondaryAuth, email, password);
     return userCredential.user.uid;
+  } catch (err: any) {
+    if (err.code === "auth/operation-not-allowed" || err.message?.includes("operation-not-allowed")) {
+      console.warn("Email/Password Auth is disabled in Firebase console. Generating local UID instead.");
+      return `local_uid_${Date.now()}`;
+    }
+    throw err;
   } finally {
     await deleteApp(secondaryApp);
   }

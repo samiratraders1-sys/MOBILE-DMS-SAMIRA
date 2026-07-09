@@ -40,6 +40,19 @@ export default function InventoryView({ products, add, update, remove, suppliers
   const [selectedProductForHistory, setSelectedProductForHistory] = useState<any | null>(null);
   const [forecasts, setForecasts] = useState<Record<string, number>>({});
   const [loadingForecast, setLoadingForecast] = useState<Record<string, boolean>>({});
+  const [isSubmittingForm, setIsSubmittingForm] = useState(false);
+  const [stockTypeFilter, setStockTypeFilter] = useState<"ALL" | "FRESH" | "DAMAGE">("ALL");
+
+  const damageStockMap = useMemo(() => {
+    const map: Record<string, number> = {};
+    const dmgData = Array.isArray(damageInventory) ? damageInventory : (damageInventory as any)?.data || [];
+    dmgData.forEach((log: any) => {
+      const pId = log.productId;
+      if (!pId) return;
+      map[pId] = (map[pId] || 0) + Number(log.quantity || 0);
+    });
+    return map;
+  }, [damageInventory]);
 
   // Inline Editing States
   const [inlineEditId, setInlineEditId] = useState<string | null>(null);
@@ -57,6 +70,13 @@ export default function InventoryView({ products, add, update, remove, suppliers
   const [isSavingInline, setIsSavingInline] = useState(false);
   const [previewData, setPreviewData] = useState<any[]>([]);
   const [lastImportedIds, setLastImportedIds] = useState<string[]>([]);
+  const [importReport, setImportReport] = useState<{
+    total: number;
+    created: number;
+    updated: number;
+    skipped: number;
+    details: string[];
+  } | null>(null);
 
   // Voice search states
   const [isListening, setIsListening] = useState(false);
@@ -195,15 +215,24 @@ export default function InventoryView({ products, add, update, remove, suppliers
 
   const categories = useMemo(() => [...new Set(products.map(p => p.category || "General"))], [products]);
 
-  const filtered = products.filter(p => 
-    (p.name.toLowerCase().includes(search.toLowerCase()) || 
-    (p.sku && p.sku.toLowerCase().includes(search.toLowerCase()))) &&
-    (selectedCategories.length === 0 || 
+  const filtered = products.filter(p => {
+    const matchesSearch = (p.name.toLowerCase().includes(search.toLowerCase()) || 
+      (p.sku && p.sku.toLowerCase().includes(search.toLowerCase())));
+    
+    const matchesCategory = (selectedCategories.length === 0 || 
         (selectedCategories.includes('LOW_STOCK') && (p.stock || 0) <= (p.minStockLevel || 5)) ||
         selectedCategories.includes(p.category || "General")
-    ) &&
-    (selectedSuppliers.length === 0 || selectedSuppliers.includes(p.supplierId || ""))
-  );
+    );
+    
+    const matchesSupplier = (selectedSuppliers.length === 0 || selectedSuppliers.includes(p.supplierId || ""));
+
+    const damageQty = damageStockMap[p.id] || 0;
+    const matchesStockType = stockTypeFilter === "ALL" ||
+      (stockTypeFilter === "FRESH" && (p.stock || 0) > 0) ||
+      (stockTypeFilter === "DAMAGE" && damageQty > 0);
+
+    return matchesSearch && matchesCategory && matchesSupplier && matchesStockType;
+  });
 
   const movements = useMemo(() => {
       const pMovements: StockMovement[] = purchases.map(p => ({
@@ -312,10 +341,12 @@ export default function InventoryView({ products, add, update, remove, suppliers
 
   const handleAdd = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (isSubmittingForm) return;
+    setIsSubmittingForm(true);
     const formData = new FormData(e.currentTarget);
     const product = {
       name: formData.get("name") as string,
-      sku: formData.get("sku") as string,
+      sku: (formData.get("sku") as string || "").trim(),
       barcode: formData.get("barcode") as string || "",
       brand: formData.get("brand") as string || "",
       company: formData.get("company") as string || "",
@@ -331,73 +362,94 @@ export default function InventoryView({ products, add, update, remove, suppliers
       minStockLevel: Number(formData.get("minStockLevel") || 5),
       status: formData.get("status") as string || "Active"
     };
-    
-    if (editingId) {
-      const origProduct = products.find(p => p.id === editingId);
-      const prevStock = origProduct ? Number(origProduct.stock) || 0 : 0;
-      const nextStock = Number(product.stock);
 
-      await update(editingId, product);
-
-      if (prevStock !== nextStock) {
-        if (stockAdjustments && stockAdjustments.add) {
-          await stockAdjustments.add({
-            productId: editingId,
-            productName: product.name || "N/A",
-            sku: product.sku || "N/A",
-            previousStock: prevStock,
-            newStock: nextStock,
-            quantityChanged: nextStock - prevStock,
-            reason: "পণ্যের বিবরণী পরিবর্তন (Product Details Edited)",
-            date: new Date().toISOString(),
-            user: user?.email || "Unknown"
-          });
-        }
-        await recordStockMovement(origProduct.id, 'ADJUSTMENT', nextStock - prevStock, editingId);
-      }
-      setEditingId(null);
-    } else {
-      const newId = await add({
-          name: product.name,
-          sku: product.sku,
-          barcode: product.barcode,
-          brand: product.brand,
-          company: product.company,
-          price: product.price,
-          cost: product.cost,
-          stock: product.stock,
-          cartoonSize: product.cartoonSize,
-          cartonMarginSubDB: product.cartonMarginSubDB,
-          supplierId: product.supplierId,
-          unit: product.unit,
-          category: product.category,
-          expiryDate: product.expiryDate,
-          minStockLevel: product.minStockLevel,
-          status: product.status
-      });
-      if (newId && product.stock > 0) {
-        if (stockAdjustments && stockAdjustments.add) {
-          await stockAdjustments.add({
-            productId: newId,
-            productName: product.name || "N/A",
-            sku: product.sku || "N/A",
-            previousStock: 0,
-            newStock: product.stock,
-            quantityChanged: product.stock,
-            reason: "নতুন পণ্য প্রারম্ভিক মজুদ (New Product Opening Stock)",
-            date: new Date().toISOString(),
-            user: user?.email || "Unknown"
-          });
-        }
-        await recordStockMovement(newId, 'OPENING', product.stock, newId);
+    if (product.sku && product.sku !== "") {
+      const exists = products.find(p => p.sku && p.sku.toLowerCase() === product.sku.toLowerCase() && p.id !== editingId);
+      if (exists) {
+        toast.error(`এই SKU বা প্রোডাক্ট কোডটি (${product.sku}) ইতিমধ্যে "${exists.name}" পণ্যের জন্য ব্যবহৃত হচ্ছে!`);
+        setIsSubmittingForm(false);
+        return;
       }
     }
-    setShowAdd(false);
+    
+    try {
+      if (editingId) {
+        const origProduct = products.find(p => p.id === editingId);
+        const prevStock = origProduct ? Number(origProduct.stock) || 0 : 0;
+        const nextStock = Number(product.stock);
+
+        await update(editingId, product);
+
+        if (prevStock !== nextStock) {
+          if (stockAdjustments && stockAdjustments.add) {
+            await stockAdjustments.add({
+              productId: editingId,
+              productName: product.name || "N/A",
+              sku: product.sku || "N/A",
+              previousStock: prevStock,
+              newStock: nextStock,
+              quantityChanged: nextStock - prevStock,
+              reason: "পণ্যের বিবরণী পরিবর্তন (Product Details Edited)",
+              date: new Date().toISOString(),
+              user: user?.email || "Unknown"
+            });
+          }
+          await recordStockMovement(origProduct.id, 'ADJUSTMENT', nextStock - prevStock, editingId);
+        }
+        setEditingId(null);
+        toast.success("পণ্য বিবরণী সফলভাবে আপডেট হয়েছে!");
+      } else {
+        const newId = await add({
+            name: product.name,
+            sku: product.sku,
+            barcode: product.barcode,
+            brand: product.brand,
+            company: product.company,
+            price: product.price,
+            cost: product.cost,
+            stock: product.stock,
+            cartoonSize: product.cartoonSize,
+            cartonMarginSubDB: product.cartonMarginSubDB,
+            supplierId: product.supplierId,
+            unit: product.unit,
+            category: product.category,
+            expiryDate: product.expiryDate,
+            minStockLevel: product.minStockLevel,
+            status: product.status
+        });
+        if (newId && product.stock > 0) {
+          if (stockAdjustments && stockAdjustments.add) {
+            await stockAdjustments.add({
+              productId: newId,
+              productName: product.name || "N/A",
+              sku: product.sku || "N/A",
+              previousStock: 0,
+              newStock: product.stock,
+              quantityChanged: product.stock,
+              reason: "নতুন পণ্য প্রারম্ভিক মজুদ (New Product Opening Stock)",
+              date: new Date().toISOString(),
+              user: user?.email || "Unknown"
+            });
+          }
+          await recordStockMovement(newId, 'OPENING', product.stock, newId);
+        }
+        toast.success("নতুন পণ্য সফলভাবে তৈরি হয়েছে!");
+      }
+      setShowAdd(false);
+    } catch (err: any) {
+      toast.error("পণ্য সংরক্ষণ ব্যর্থ হয়েছে: " + err.message);
+    } finally {
+      setIsSubmittingForm(false);
+    }
   };
 
   const handleBulkSave = async () => {
     const lines = bulkText.split("\n").map(l => l.trim()).filter(l => l);
-    let count = 0;
+    let total = 0;
+    let created = 0;
+    let updated = 0;
+    let skipped = 0;
+    const details: string[] = [];
     
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
@@ -412,6 +464,7 @@ export default function InventoryView({ products, add, update, remove, suppliers
         continue;
       }
       
+      total++;
       // Robust CSV / Tab splitter that handles enclosing quotes and commas inside them
       const parts: string[] = [];
       if (line.includes("\t")) {
@@ -452,8 +505,8 @@ export default function InventoryView({ products, add, update, remove, suppliers
       }
 
       if (parts[0]) {
-        const name = parts[0];
-        const sku = parts[1] || "";
+        const name = parts[0].trim();
+        const sku = (parts[1] || "").trim();
         const category = parts[2] || "General";
         const stock = Number(parts[3] || 0);
         const price = Number(parts[4] || 0);
@@ -461,6 +514,12 @@ export default function InventoryView({ products, add, update, remove, suppliers
         const cartoonSize = Number(parts[6] || 1);
         const unit = parts[7] || "Pcs";
         const tempSupplier = parts[8] || "";
+
+        if (!name) {
+          skipped++;
+          details.push(`লাইন ${i+1}: পণ্যের নাম খালি ছিল, স্কিপ করা হয়েছে।`);
+          continue;
+        }
 
         // Find supplier by name in collections
         let foundSupplierId = "";
@@ -473,7 +532,10 @@ export default function InventoryView({ products, add, update, remove, suppliers
           }
         }
 
-        await add({
+        // Check if SKU is empty but check name, or if SKU is set check SKU
+        const existing = products.find(p => (sku && p.sku && p.sku.toLowerCase() === sku.toLowerCase()) || p.name.trim().toLowerCase() === name.toLowerCase());
+
+        const productData = {
           name,
           sku,
           category,
@@ -482,15 +544,80 @@ export default function InventoryView({ products, add, update, remove, suppliers
           cost,
           cartoonSize,
           unit,
-          supplierId: foundSupplierId,
+          supplierId: foundSupplierId || existing?.supplierId || "",
           minStockLevel: 5
-        });
-        count++;
+        };
+
+        try {
+          if (existing) {
+            const prevStock = Number(existing.stock) || 0;
+            await update(existing.id, { ...existing, ...productData });
+            if (prevStock !== stock) {
+              if (stockAdjustments && stockAdjustments.add) {
+                await stockAdjustments.add({
+                  productId: existing.id,
+                  productName: name,
+                  sku: sku,
+                  previousStock: prevStock,
+                  newStock: stock,
+                  quantityChanged: stock - prevStock,
+                  reason: "বাল্ক আপলোড স্টক আপডেট (Bulk Upload Stock Update)",
+                  date: new Date().toISOString(),
+                  user: user?.email || "Unknown"
+                });
+              }
+              await recordStockMovement(existing.id, 'ADJUSTMENT', stock - prevStock, existing.id);
+            }
+            updated++;
+            details.push(`[UPDATE] ${name} (SKU: ${sku || 'N/A'}) - স্টক: ${stock}`);
+          } else {
+            // Check if SKU is duplicated across existing list
+            if (sku) {
+              const duplicateSku = products.find(p => p.sku && p.sku.toLowerCase() === sku.toLowerCase());
+              if (duplicateSku) {
+                skipped++;
+                details.push(`[DUPLICATE SKU] ${name} (SKU: ${sku}) ইতিমধ্যে "${duplicateSku.name}" পণ্যটির জন্য ব্যবহৃত হচ্ছে। স্কিপ করা হয়েছে।`);
+                continue;
+              }
+            }
+            
+            const newId = await add(productData);
+            if (newId) {
+              if (stock > 0) {
+                if (stockAdjustments && stockAdjustments.add) {
+                  await stockAdjustments.add({
+                    productId: newId,
+                    productName: name,
+                    sku: sku,
+                    previousStock: 0,
+                    newStock: stock,
+                    quantityChanged: stock,
+                    reason: "বাল্ক আপলোড নতুন পণ্য (Bulk Upload New Product)",
+                    date: new Date().toISOString(),
+                    user: user?.email || "Unknown"
+                  });
+                }
+                await recordStockMovement(newId, 'OPENING', stock, newId);
+              }
+              created++;
+              details.push(`[NEW] ${name} (SKU: ${sku || 'N/A'}) - নতুন পণ্য সফলভাবে যুক্ত হয়েছে।`);
+            } else {
+              skipped++;
+              details.push(`[FAILED] ${name} সংরক্ষণ করা সম্ভব হয়নি।`);
+            }
+          }
+        } catch (err: any) {
+          skipped++;
+          details.push(`[ERROR] ${name}: ${err.message}`);
+        }
+      } else {
+        skipped++;
+        details.push(`লাইন ${i+1}: সঠিক তথ্য পাওয়া যায়নি।`);
       }
     }
     setBulkText("");
-    setShowBulk(false);
-    toast.success(`${count} টি পণ্য সফলভাবে বাল্ক এন্ট্রি করা হয়েছে`);
+    setImportReport({ total, created, updated, skipped, details });
+    toast.success(`${created} টি নতুন পণ্য এবং ${updated} টি পণ্য আপডেট করা হয়েছে।`);
   };
 
   const handleUndoImport = async () => {
@@ -508,11 +635,21 @@ export default function InventoryView({ products, add, update, remove, suppliers
   };
 
   const confirmImportInventory = async () => {
-      let count = 0;
+      let total = 0;
+      let created = 0;
+      let updated = 0;
+      let skipped = 0;
+      const details: string[] = [];
       const newIds: string[] = [];
+      
       for (const itemData of previewData) {
-         if (!itemData.Name && !itemData.name) continue;
+         if (!itemData.Name && !itemData.name) {
+             skipped++;
+             details.push(`সারি ${total+1}: নাম খালি থাকায় স্কিপ করা হয়েছে।`);
+             continue;
+         }
          
+         total++;
          const name = (itemData.Name || itemData.name).trim();
          const sku = (itemData.SKU || itemData.sku || "").trim();
          const category = (itemData.Category || itemData.category || "General").trim();
@@ -534,7 +671,7 @@ export default function InventoryView({ products, add, update, remove, suppliers
          }
          
          // Check if exists
-         const existing = products.find(p => (sku && p.sku === sku) || p.name.trim().toLowerCase() === name.toLowerCase());
+         const existing = products.find(p => (sku && p.sku && p.sku.toLowerCase() === sku.toLowerCase()) || p.name.trim().toLowerCase() === name.toLowerCase());
 
          const productData = {
            name,
@@ -545,30 +682,66 @@ export default function InventoryView({ products, add, update, remove, suppliers
            cost,
            cartoonSize,
            unit,
-           supplierId: foundSupplierId,
+           supplierId: foundSupplierId || existing?.supplierId || "",
            minStockLevel: 5
          };
 
-         if (existing) {
-             await update(existing.id, { ...existing, ...productData });
-         } else {
-             const newId = await add(productData);
-             if (newId) {
-                 newIds.push(newId);
-                 if (productData.stock > 0) {
-                    await recordStockMovement(newId, 'OPENING', productData.stock, newId);
+         try {
+           if (existing) {
+               const prevStock = Number(existing.stock) || 0;
+               await update(existing.id, { ...existing, ...productData });
+               if (prevStock !== stock) {
+                   if (stockAdjustments && stockAdjustments.add) {
+                       await stockAdjustments.add({
+                           productId: existing.id,
+                           productName: name,
+                           sku: sku,
+                           previousStock: prevStock,
+                           newStock: stock,
+                           quantityChanged: stock - prevStock,
+                           reason: "ফাইল ইম্পোর্ট স্টক আপডেট (File Import Stock Update)",
+                           date: new Date().toISOString(),
+                           user: user?.email || "Unknown"
+                       });
+                   }
+                   await recordStockMovement(existing.id, 'ADJUSTMENT', stock - prevStock, existing.id);
+               }
+               updated++;
+               details.push(`[UPDATE] ${name} (SKU: ${sku || 'N/A'}) - স্টক: ${stock}`);
+           } else {
+               // Check if SKU is duplicated in products list
+               if (sku) {
+                 const duplicateSku = products.find(p => p.sku && p.sku.toLowerCase() === sku.toLowerCase());
+                 if (duplicateSku) {
+                     skipped++;
+                     details.push(`[DUPLICATE SKU] ${name} (SKU: ${sku}) ইতিমধ্যে "${duplicateSku.name}" পণ্যটির জন্য ব্যবহৃত হচ্ছে। স্কিপ করা হয়েছে।`);
+                     continue;
                  }
-             }
+               }
+
+               const newId = await add(productData);
+               if (newId) {
+                   newIds.push(newId);
+                   if (productData.stock > 0) {
+                      await recordStockMovement(newId, 'OPENING', productData.stock, newId);
+                   }
+                   created++;
+                   details.push(`[NEW] ${name} (SKU: ${sku || 'N/A'}) - নতুন পণ্য যুক্ত করা হয়েছে।`);
+               } else {
+                   skipped++;
+                   details.push(`[FAILED] ${name} ডেটাবেজে সংরক্ষণ করা যায়নি।`);
+               }
+           }
+         } catch (err: any) {
+             skipped++;
+             details.push(`[ERROR] ${name}: ${err.message}`);
          }
-         count++;
       }
+      
       setPreviewData([]);
-      setShowBulk(false);
       setLastImportedIds(newIds);
-      toast.success(`${count} টি পণ্য সফলভাবে ইম্পোর্ট করা হয়েছে`, {
-          duration: 5000,
-      });
-      // Added undo logic separately if needed or just removed it for simplicity if 'action' is causing issues
+      setImportReport({ total, created, updated, skipped, details });
+      toast.success(`${created} টি নতুন পণ্য এবং ${updated} টি পণ্য আপডেট করা হয়েছে।`);
   };
 
   return (
@@ -717,6 +890,27 @@ export default function InventoryView({ products, add, update, remove, suppliers
           placeholder="সকল সাপ্লায়ার"
           className="w-full sm:w-52 shrink-0"
         />
+        <div className="flex bg-gray-100 p-1 rounded-xl gap-1 shrink-0 border border-gray-200">
+          <button
+            onClick={() => setStockTypeFilter("ALL")}
+            className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all ${stockTypeFilter === "ALL" ? "bg-slate-900 text-white shadow-sm" : "text-gray-600 hover:text-gray-900"}`}
+          >
+            সকল স্টক
+          </button>
+          <button
+            onClick={() => setStockTypeFilter("FRESH")}
+            className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all ${stockTypeFilter === "FRESH" ? "bg-emerald-600 text-white shadow-sm" : "text-gray-600 hover:text-gray-900"}`}
+          >
+            ফ্রেশ পণ্য
+          </button>
+          <button
+            onClick={() => setStockTypeFilter("DAMAGE")}
+            className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all ${stockTypeFilter === "DAMAGE" ? "bg-rose-600 text-white shadow-sm" : "text-gray-600 hover:text-gray-900"}`}
+          >
+            ড্যামেজ পণ্য
+          </button>
+        </div>
+
         <button 
             onClick={() => {
                 if (selectedCategories.length === 1 && selectedCategories[0] === 'LOW_STOCK') {
@@ -742,7 +936,8 @@ export default function InventoryView({ products, add, update, remove, suppliers
               <th className="px-6 py-4 font-semibold text-xs uppercase text-[#ADB5BD]">পণ্যের নাম</th>
               <th className="px-6 py-4 font-semibold text-xs uppercase text-[#ADB5BD]">ক্যাটাগরি</th>
               <th className="px-6 py-4 font-semibold text-xs uppercase text-[#ADB5BD]">মেয়াদউত্তীর্ণ তারিখ</th>
-              <th className="px-6 py-4 font-semibold text-xs uppercase text-[#ADB5BD]">মজুদ (Stock)</th>
+              <th className="px-6 py-4 font-semibold text-xs uppercase text-[#ADB5BD] text-center">ফ্রেশ স্টক</th>
+              <th className="px-6 py-4 font-semibold text-xs uppercase text-[#ADB5BD] text-center">ড্যামেজ স্টক</th>
               <th className="px-6 py-4 font-semibold text-xs uppercase text-[#ADB5BD]">বিক্রয় মূল্য</th>
               <th className="px-6 py-4 font-semibold text-xs uppercase text-[#ADB5BD]">কেনার দাম (Cost)</th>
               <th className="px-6 py-4 font-semibold text-xs uppercase text-[#ADB5BD]">অ্যাকশন</th>
@@ -780,15 +975,15 @@ export default function InventoryView({ products, add, update, remove, suppliers
                   {p.expiryDate || "N/A"}
                   {(isExpired || isNearingExpiry) && <span className="ml-2 text-xs">({isExpired ? "মেয়াদ শেষ" : "মেয়াদ শেষ হবে"})</span>}
                 </td>
-                <td className="px-6 py-4">
+                <td className="px-6 py-4 text-center">
                   {p.id === inlineEditId && role !== "sr" ? (
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center justify-center gap-1">
                       <input 
                         type="number" 
                         step="any"
                         value={inlineStock} 
                         onChange={(e) => setInlineStock(Number(e.target.value))}
-                        className="w-24 px-2 py-1 border border-gray-300 rounded-lg text-sm text-gray-950 font-mono focus:outline-none focus:ring-1 focus:ring-black bg-white"
+                        className="w-20 px-2 py-1 border border-gray-300 rounded-lg text-sm text-gray-950 font-mono focus:outline-none focus:ring-1 focus:ring-black bg-white"
                         autoFocus
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') handleInlineSave(p.id);
@@ -806,12 +1001,24 @@ export default function InventoryView({ products, add, update, remove, suppliers
                         setInlinePrice(p.price);
                         setInlineCost(p.cost || 0);
                       }}
-                      className={`${(p.stock !== undefined ? p.stock : 0) <= (p.minStockLevel || 5) ? "text-red-500 font-bold" : ""} ${role === "sr" ? "" : "cursor-pointer border-b border-dashed border-gray-300 hover:border-black"} select-none inline-block`}
+                      className={`${(p.stock !== undefined ? p.stock : 0) <= (p.minStockLevel || 5) ? "text-red-500 font-bold" : "text-gray-900 font-extrabold"} ${role === "sr" ? "" : "cursor-pointer border-b border-dashed border-gray-300 hover:border-black"} select-none inline-block`}
                       title={role === "sr" ? "" : "ডাবল ক্লিক করে ইনলাইন এডিট করুন"}
                     >
                       {p.stock !== undefined ? p.stock : 0} {p.unit || "pcs"}
                     </div>
                   )}
+                </td>
+                <td className="px-6 py-4 text-center whitespace-nowrap">
+                  {(() => {
+                    const dQty = damageStockMap[p.id] || 0;
+                    return dQty > 0 ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-black bg-rose-50 text-rose-700 border border-rose-100 font-mono">
+                        {dQty} {p.unit || "pcs"}
+                      </span>
+                    ) : (
+                      <span className="text-gray-400 text-xs font-semibold">-</span>
+                    );
+                  })()}
                 </td>
                 <td className="px-6 py-4 font-mono font-medium">
                   {p.id === inlineEditId && role !== "sr" ? (
@@ -947,9 +1154,30 @@ export default function InventoryView({ products, add, update, remove, suppliers
                               setInlinePrice(p.price);
                               setInlineCost(p.cost || 0);
                             }}
+                            className="p-2 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg animate-pulse"
                             title="ইনলাইন এডিট করুন"
                           >
                             <Edit2 className="w-4 h-4" />
+                          </button>
+                          <button 
+                            onClick={async () => {
+                              const confirmed = await confirmDelete({
+                                title: "পণ্য ডিলিট নিশ্চিতকরণ",
+                                message: `আপনি কি নিশ্চিতভাবে "${p.name}" পণ্যটি ডিলিট করতে চান?`
+                              });
+                              if (confirmed) {
+                                try {
+                                  await remove(p.id);
+                                  toast.success("পণ্যটি সফলভাবে ডিলিট করা হয়েছে।");
+                                } catch (error: any) {
+                                  toast.error("ডিলিট করতে সমস্যা হয়েছে: " + error.message);
+                                }
+                              }
+                            }}
+                            className="p-2 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg"
+                            title="পণ্য ডিলিট করুন"
+                          >
+                            <Trash2 className="w-4 h-4 animate-pulse" />
                           </button>
                         </>
                       )}
@@ -1088,13 +1316,132 @@ export default function InventoryView({ products, add, update, remove, suppliers
                 {/* সাবমিট ও বাতিল বোতাম */}
                 <div className="flex gap-4 pt-4 border-t">
                   <button type="button" onClick={() => setShowAdd(false)} className="flex-1 border py-3 rounded-xl font-bold text-sm bg-gray-50 hover:bg-gray-100 transition">বাতিল</button>
-                  <button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm py-3 rounded-xl transition">সংরক্ষণ করুন</button>
+                  <button type="submit" disabled={isSubmittingForm} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm py-3 rounded-xl transition disabled:opacity-50">
+                    {isSubmittingForm ? "সংরক্ষণ হচ্ছে..." : "সংরক্ষণ করুন"}
+                  </button>
                 </div>
               </form>
             </div>
           </div>
         );
       })()}
+
+      {showBulk && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white max-w-3xl w-full rounded-2xl p-6 shadow-2xl overflow-y-auto max-h-[90vh]">
+            <div className="border-b pb-3 mb-4 flex justify-between items-center">
+              <h3 className="text-xl font-bold text-gray-900">
+                📦 বাল্ক পণ্য এন্ট্রি ও ইম্পোর্ট (Bulk Product Import)
+              </h3>
+              <button 
+                onClick={() => {
+                  setShowBulk(false);
+                  setImportReport(null);
+                }} 
+                className="text-gray-400 hover:text-gray-600 font-bold text-2xl"
+              >
+                &times;
+              </button>
+            </div>
+
+            <div className="space-y-6">
+              {/* Option 1: File Upload */}
+              <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100">
+                <h4 className="text-sm font-extrabold text-slate-800 mb-2">১. ফাইল আপলোড (.xlsx, .csv)</h4>
+                <p className="text-xs text-slate-500 mb-4 leading-relaxed">
+                  Excel (.xlsx) বা CSV ফাইল আপলোড করুন। ফাইলের প্রথম রো বা কলামের নামগুলো হতে হবে:
+                  <code className="bg-white px-1.5 py-0.5 rounded border text-indigo-600 font-mono text-[11px] ml-1">Name</code>, 
+                  <code className="bg-white px-1.5 py-0.5 rounded border text-indigo-600 font-mono text-[11px] ml-1">SKU</code>, 
+                  <code className="bg-white px-1.5 py-0.5 rounded border text-indigo-600 font-mono text-[11px] ml-1">Category</code>, 
+                  <code className="bg-white px-1.5 py-0.5 rounded border text-indigo-600 font-mono text-[11px] ml-1">Stock</code>, 
+                  <code className="bg-white px-1.5 py-0.5 rounded border text-indigo-600 font-mono text-[11px] ml-1">Sale Price</code>, 
+                  <code className="bg-white px-1.5 py-0.5 rounded border text-indigo-600 font-mono text-[11px] ml-1">Purchase Cost</code>, 
+                  <code className="bg-white px-1.5 py-0.5 rounded border text-indigo-600 font-mono text-[11px] ml-1">CartonSize</code>, 
+                  <code className="bg-white px-1.5 py-0.5 rounded border text-indigo-600 font-mono text-[11px] ml-1">Unit</code>, 
+                  <code className="bg-white px-1.5 py-0.5 rounded border text-indigo-600 font-mono text-[11px] ml-1">SupplierName</code>।
+                </p>
+                <CSVUploader 
+                  title="পণ্য ইনভেন্টরি" 
+                  onImport={handleImportInventory} 
+                />
+              </div>
+
+              {/* Option 2: Copy Paste Text Area */}
+              <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100">
+                <h4 className="text-sm font-extrabold text-slate-800 mb-2">২. সরাসরি এক্সেল থেকে কপি-পেস্ট করুন</h4>
+                <p className="text-xs text-slate-500 mb-3 leading-relaxed">
+                  এক্সেল ফাইলের কলামগুলো (Name, SKU, Category, Stock, Sale Price, Purchase Cost, CartonSize, Unit, SupplierName) ক্রমানুসারে কপি করে নিচের বক্সে পেস্ট করুন। প্রতি লাইনে একটি করে পণ্য থাকবে।
+                </p>
+                <textarea
+                  value={bulkText}
+                  onChange={(e) => setBulkText(e.target.value)}
+                  placeholder={`Pran Mango 250ml\tPRN-MJ250\tBeverage\t120\t25\t20\t24\tPcs\tPran Supplier\nACI Aerosol 475ml\tACI-AER475\tGroceries\t60\t280\t240\t12\tPcs\tACI Supplier`}
+                  rows={6}
+                  className="w-full border rounded-xl p-3 text-xs bg-white focus:ring-1 focus:ring-blue-500 outline-none transition font-mono"
+                />
+                <div className="mt-3 flex justify-end">
+                  <button
+                    onClick={handleBulkSave}
+                    disabled={!bulkText.trim()}
+                    className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-5 py-2.5 rounded-xl transition disabled:opacity-50"
+                  >
+                    পেস্টকৃত তথ্য সংরক্ষণ করুন
+                  </button>
+                </div>
+              </div>
+
+              {/* Success & Error Report Display */}
+              {importReport && (
+                <div className="bg-white border rounded-2xl p-5 space-y-3">
+                  <h4 className="text-sm font-extrabold text-slate-900 border-b pb-2 flex items-center justify-between">
+                    <span>📊 ইম্পোর্ট রিপোর্ট ও ফলাফল (Import Statement)</span>
+                    <span className="text-xs text-slate-500 font-medium font-mono">
+                      মোট পঠিত: {importReport.total}
+                    </span>
+                  </h4>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="bg-emerald-50 border border-emerald-100 p-3 rounded-xl text-center">
+                      <div className="text-xs font-bold text-emerald-700">নতুন যোগ করা হয়েছে</div>
+                      <div className="text-lg font-black text-emerald-800 font-mono mt-1">{importReport.created}</div>
+                    </div>
+                    <div className="bg-blue-50 border border-blue-100 p-3 rounded-xl text-center">
+                      <div className="text-xs font-bold text-blue-700">আপডেট করা হয়েছে</div>
+                      <div className="text-lg font-black text-blue-800 font-mono mt-1">{importReport.updated}</div>
+                    </div>
+                    <div className="bg-rose-50 border border-rose-100 p-3 rounded-xl text-center">
+                      <div className="text-xs font-bold text-rose-700">বাতিল/ত্রুটিযুক্ত</div>
+                      <div className="text-lg font-black text-rose-800 font-mono mt-1">{importReport.skipped}</div>
+                    </div>
+                  </div>
+
+                  {importReport.details.length > 0 && (
+                    <div>
+                      <span className="text-xs font-bold text-slate-700 block mb-1">বিস্তারিত বিবরণ (Detailed Logs):</span>
+                      <div className="bg-slate-950 text-slate-200 text-[11px] font-mono rounded-xl p-3 max-h-40 overflow-y-auto space-y-1">
+                        {importReport.details.map((detail, idx) => (
+                          <div key={idx} className="border-b border-slate-800 pb-1 last:border-0">{detail}</div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="border-t pt-4 mt-6 flex justify-end">
+              <button 
+                onClick={() => {
+                  setShowBulk(false);
+                  setImportReport(null);
+                }} 
+                className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm px-6 py-2.5 rounded-xl transition"
+              >
+                বন্ধ করুন
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {selectedProductForHistory && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">

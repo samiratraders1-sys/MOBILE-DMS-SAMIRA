@@ -135,27 +135,64 @@ export function calculateNetProfit({
 
   // E) Total Expenses (DSR summaries route expenses + legacy out-payments + new shared expenses)
   let totalExpenses = 0;
+  let salaryExpenses = 0;
+  let operationalExpenses = 0;
 
-  // Add route-level local expenses from DSR summaries
+  // 1. Add route-level local expenses from DSR summaries (these are operational costs)
   filteredSummaries.forEach(s => {
     const summaryRouteExp = (s.expenses || []).reduce((acc: number, e: any) => acc + Number(e.amount || 0), 0);
-    totalExpenses += summaryRouteExp;
+    operationalExpenses += summaryRouteExp;
   });
 
-  // Add payments with type === 'out' (excluding "Supplier Payment" as it goes to stock assets and handled via COGS)
-  const legacyExpenses = filteredPayments
+  // 2. Add payments with type === 'out' (excluding "Supplier Payment" as it goes to stock assets and handled via COGS)
+  filteredPayments
     .filter(p => p.type === "out" && p.category !== "Supplier Payment" && p.category !== "সাপ্লায়ার পেমেন্ট")
-    .reduce((sum, p) => sum + Number(p.amount || 0), 0);
-  totalExpenses += legacyExpenses;
+    .forEach(p => {
+      const cat = (p.category || "").toLowerCase();
+      const desc = (p.description || "").toLowerCase();
+      const isSalary = 
+        cat.includes("salary") || 
+        cat.includes("payroll") || 
+        cat.includes("advance") || 
+        cat.includes("debt") || 
+        cat.includes("বেতন") || 
+        cat.includes("পারিশ্রমিক") ||
+        desc.includes("salary") || 
+        desc.includes("বেতন");
 
-  // Add new shared expenses collection entries (avoiding double counting if they are also in filteredPayments)
+      if (isSalary) {
+        salaryExpenses += Number(p.amount || 0);
+      } else {
+        operationalExpenses += Number(p.amount || 0);
+      }
+    });
+
+  // 3. Add new shared expenses collection entries (avoiding double counting if they are also in filteredPayments)
   filteredExpenses.forEach(e => {
     // If this expense is already in payments, do not double-count
     const isAlreadyCounted = filteredPayments.some(p => p.id === e.id || (p.createdAt && e.createdAt && p.createdAt === e.createdAt));
     if (!isAlreadyCounted) {
-      totalExpenses += Number(e.amount || 0);
+      const cat = (e.category || "").toLowerCase();
+      const desc = (e.description || "").toLowerCase();
+      const isSalary = 
+        cat.includes("salary") || 
+        cat.includes("payroll") || 
+        cat.includes("advance") || 
+        cat.includes("বেতন") || 
+        cat.includes("পারিশ্রমিক") ||
+        desc.includes("salary") || 
+        desc.includes("বেতন");
+
+      if (isSalary) {
+        salaryExpenses += Number(e.amount || 0);
+      } else {
+        operationalExpenses += Number(e.amount || 0);
+      }
     }
   });
+
+  // Total Expenses is the sum of salaries and operational costs
+  totalExpenses = salaryExpenses + operationalExpenses;
 
   // Net Profit formula: (Sales Margin + Sub Depot Commission + Other Income) - Total Expenses
   const netProfit = (salesMargin + subDepotCommission + otherIncome) - totalExpenses;

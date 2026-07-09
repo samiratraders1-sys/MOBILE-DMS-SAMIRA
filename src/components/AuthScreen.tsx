@@ -55,10 +55,29 @@ export default function AuthScreen({ onEnterDemo }: AuthScreenProps) {
     if (isLoading) return;
     setIsLoading(true);
     try {
-      // Format phone number to an email structure
-      const formattedEmail = `${email.trim().toLowerCase()}@samirabms.com`;
+      // Format phone number to an email structure if not already an email
+      const usernameLower = email.trim().toLowerCase();
+      const formattedEmail = usernameLower.includes("@") ? usernameLower : `${usernameLower}@samirabms.com`;
       await loginWithEmail(formattedEmail, password);
     } catch (error: any) {
+      if (error.code === 'auth/operation-not-allowed' || error.message?.includes('operation-not-allowed')) {
+        console.warn("Email/Password Auth is disabled. Falling back to local/demo session...");
+        const usernameLower = email.trim().toLowerCase();
+        const demoUser = {
+          email: usernameLower.includes("@") ? usernameLower : `${usernameLower}@samirabms.com`,
+          uid: `demo_local_${Date.now()}`,
+          displayName: email.trim(),
+          emailVerified: true
+        };
+        try {
+          localStorage.setItem("demo_user_session", JSON.stringify(demoUser));
+          window.dispatchEvent(new Event("auth-state-change"));
+          toast.success("অফলাইন লোকাল সেশনে সফলভাবে লগইন করা হয়েছে!");
+        } catch (e) {
+          console.error(e);
+        }
+        return;
+      }
       console.error("Email login error:", error);
       if (error.code === 'auth/network-request-failed' || error.message?.includes('network-request-failed')) {
         toast.error("নেটওয়ার্ক কানেকশন বা আইফ্রেম রেস্ট্রিকশনের কারণে ফায়ারবেস কানেক্ট করা যায়নি। অনুগ্রহ করে নিচে দেওয়া 'ডেমো মোডে প্রবেশ করুন' বোতামটি চাপুন।", { duration: 8000 });

@@ -55,6 +55,7 @@ import DeliveryRouteView from "./components/DeliveryRouteView";
 import SuperAdminView from "./components/SuperAdminView";
 import ExpenseLedgerView from "./components/ExpenseLedgerView";
 import SupplierClaimsView from "./components/SupplierClaimsView";
+import CustomerCollectionModule from "./components/CustomerCollectionModule";
 
 import { useCollection } from "./hooks/useCollection";
 import { RolePermissions } from "./lib/permissions";
@@ -278,12 +279,15 @@ export default function App() {
   }, [user]);
 
   useEffect(() => {
-    snapshotAll(); 
-    const timer = setInterval(() => {
-        snapshotAll();
-    }, 5 * 60 * 1000);
-    return () => clearInterval(timer);
-  }, []);
+    const isDemoMode = localStorage.getItem("demo_user_session") !== null;
+    if (user && !isDemoMode) {
+      snapshotAll(); 
+      const timer = setInterval(() => {
+          snapshotAll();
+      }, 5 * 60 * 1000);
+      return () => clearInterval(timer);
+    }
+  }, [user]);
 
   const products = useCollection<any>("products");
   const routes = useCollection<any>("routes");
@@ -817,7 +821,25 @@ export default function App() {
       }
       setLoading(false);
     });
-    return () => unsubscribe();
+
+    const handleAuthChange = () => {
+      try {
+        const savedDemoUser = localStorage.getItem("demo_user_session");
+        if (savedDemoUser) {
+          setUser(JSON.parse(savedDemoUser));
+        } else if (!auth.currentUser) {
+          setUser(null);
+        }
+      } catch (e) {
+        console.error("Auth change error in App.tsx:", e);
+      }
+    };
+    window.addEventListener("auth-state-change", handleAuthChange);
+
+    return () => {
+      unsubscribe();
+      window.removeEventListener("auth-state-change", handleAuthChange);
+    };
   }, []);
 
   useEffect(() => {
@@ -1214,6 +1236,10 @@ export default function App() {
             role={role}
             user={user}
             initialTab="sales"
+            routes={routes.data}
+            expenses={expenses.data}
+            damageInventory={damageInventory.data}
+            transactions={transactions.data}
           />
         );
       case "pnl":
@@ -1236,6 +1262,10 @@ export default function App() {
             role={role}
             user={user}
             initialTab="pnl"
+            routes={routes.data}
+            expenses={expenses.data}
+            damageInventory={damageInventory.data}
+            transactions={transactions.data}
           />
         );
       case "subdb":
@@ -1260,6 +1290,18 @@ export default function App() {
             subDbSettings={subDbSettings.data}
             updateSubDbSetting={subDbSettings.update}
             addSubDbSetting={async (item) => { await subDbSettings.add(item); }}
+          />
+        );
+      case "customer-collection":
+        return (
+          <CustomerCollectionModule
+            customers={customers.data}
+            suppliers={suppliers.data}
+            products={products.data}
+            transactions={transactions.data}
+            accounts={accounts.data}
+            addPayment={payments.add}
+            role={role}
           />
         );
       case "finance":
@@ -1331,6 +1373,10 @@ export default function App() {
             role={role}
             user={user}
             initialTab="payment-history"
+            routes={routes.data}
+            expenses={expenses.data}
+            damageInventory={damageInventory.data}
+            transactions={transactions.data}
           />
         );
       case "daily-cash-book":
@@ -1353,6 +1399,10 @@ export default function App() {
             role={role}
             user={user}
             initialTab="daily-cash-book"
+            routes={routes.data}
+            expenses={expenses.data}
+            damageInventory={damageInventory.data}
+            transactions={transactions.data}
           />
         );
       case "ledger":
@@ -1521,9 +1571,36 @@ export default function App() {
             >
               <Menu className="w-6 h-6" />
             </button>
-            <div>
+            <div className="flex flex-col">
               <h1 className="text-lg lg:text-3xl font-black font-sans tracking-tighter">SAMIRA BMS v1.0</h1>
               <p className="text-[10px] lg:text-xs text-[#ADB5BD] uppercase font-bold tracking-widest leading-none">{t("Powered by Samira Traders")}</p>
+            </div>
+            {/* Quick Action Buttons Next to Brand */}
+            <div className="flex items-center gap-1.5 ml-2 md:ml-4 flex-wrap">
+              <button 
+                onClick={() => setActiveView("loadsheet")}
+                className="px-2.5 py-1.5 bg-sky-50 text-sky-700 hover:bg-sky-100 border border-sky-100 rounded-lg text-[10px] md:text-xs font-black flex items-center gap-1 transition-all shadow-2xs select-none active:scale-95 cursor-pointer"
+                title="Morning Load Sheet (সকাল: লোডশিট)"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-sky-500 animate-pulse shrink-0"></span>
+                <span>Morning Load Sheet (সকাল: লোডশিট)</span>
+              </button>
+              <button 
+                onClick={() => setActiveView("settle")}
+                className="px-2.5 py-1.5 bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-100 rounded-lg text-[10px] md:text-xs font-black flex items-center gap-1 transition-all shadow-2xs select-none active:scale-95 cursor-pointer"
+                title="Afternoon Load Sheet (বিকাল: হিসাব নিকেশ)"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse shrink-0"></span>
+                <span>Afternoon Load Sheet (বিকাল: হিসাব নিকেশ)</span>
+              </button>
+              <button 
+                onClick={() => setActiveView("subdb")}
+                className="px-2.5 py-1.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-100 rounded-lg text-[10px] md:text-xs font-black flex items-center gap-1 transition-all shadow-2xs select-none active:scale-95 cursor-pointer"
+                title="DUe Collection (Customer dual collection)"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse shrink-0"></span>
+                <span>DUe Collection (Customer dual collection)</span>
+              </button>
             </div>
           </div>
           <div className="flex items-center gap-3">

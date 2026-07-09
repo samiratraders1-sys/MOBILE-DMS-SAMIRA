@@ -48,31 +48,32 @@ export default function DailyClosingReportModal({
     setExpandedSection(prev => prev === section ? null : section);
   };
 
-  if (!isOpen || !summary) return null;
+  // Fallback for summary during initialization or when modal is closed
+  const activeSummary = summary || {};
 
   // Determine metadata
-  const routeName = routes.find(r => r.id === summary.routeId)?.name || "Unknown Route";
-  const dsrName = staff.find(st => st.id === summary.dsrId)?.name || "Unknown DSR";
-  const date = summary.settlementDate || summary.date || new Date().toISOString().split('T')[0];
+  const routeName = routes.find(r => r.id === activeSummary.routeId)?.name || "Unknown Route";
+  const dsrName = staff.find(st => st.id === activeSummary.dsrId)?.name || "Unknown DSR";
+  const date = activeSummary.settlementDate || activeSummary.date || new Date().toISOString().split('T')[0];
 
-  // Raw values from summary
-  const totalSalesValue = Number(summary.salesValue || 0);
-  const totalFreeValue = Number(summary.totalFreeValue || 0);
-  const totalDiscountValue = Number(summary.totalDiscountValue || 0);
-  const totalDamageValue = Number(summary.totalDamageValue || 0);
-  const totalExpenses = Number(summary.totalExpenses || 0);
-  const totalCredits = Number(summary.totalCredits || 0);
-  const totalPayments = Number(summary.totalPayments || 0);
+  // Raw values from activeSummary
+  const totalSalesValue = Number(activeSummary.salesValue || 0);
+  const totalFreeValue = Number(activeSummary.totalFreeValue || 0);
+  const totalDiscountValue = Number(activeSummary.totalDiscountValue || 0);
+  const totalDamageValue = Number(activeSummary.totalDamageValue || 0);
+  const totalExpenses = Number(activeSummary.totalExpenses || 0);
+  const totalCredits = Number(activeSummary.totalCredits || 0);
+  const totalPayments = Number(activeSummary.totalPayments || 0);
   
-  const dsrPayable = Number(summary.dsrPayable !== undefined ? summary.dsrPayable : (totalSalesValue - totalFreeValue - totalDiscountValue - totalDamageValue - totalExpenses - totalCredits));
-  const dsrBalance = Number(summary.dsrBalance !== undefined ? summary.dsrBalance : (totalPayments - dsrPayable));
+  const dsrPayable = Number(activeSummary.dsrPayable !== undefined ? activeSummary.dsrPayable : (totalSalesValue - totalFreeValue - totalDiscountValue - totalDamageValue - totalExpenses - totalCredits));
+  const dsrBalance = Number(activeSummary.dsrBalance !== undefined ? activeSummary.dsrBalance : (totalPayments - dsrPayable));
 
   // 1. Dynamic Supplier-wise Net Sales & Returns Calculation
   const supplierBreakdown = useMemo(() => {
     const breakdown: Record<string, { assigned: number; returned: number; netSales: number; returnRate: number }> = {};
     
     // Process items in this settlement
-    (summary.items || []).forEach((item: any) => {
+    (activeSummary.items || []).forEach((item: any) => {
       const p = products.find(prod => prod.id === item.productId);
       const sId = p?.supplierId || "all";
       
@@ -106,7 +107,7 @@ export default function DailyClosingReportModal({
         returnRate: rate
       };
     });
-  }, [summary, products, suppliers]);
+  }, [activeSummary, products, suppliers]);
 
   // Total metrics
   const totalAssigned = supplierBreakdown.reduce((sum, item) => sum + item.assigned, 0);
@@ -132,6 +133,9 @@ export default function DailyClosingReportModal({
 
   // 4. Overall Liability
   const overallLiability = liveInventoryValue + totalOutstandingDue;
+
+  // Early exit ONLY after all hooks have been unconditionally initialized
+  if (!isOpen || !summary) return null;
 
   // Trigger A4 Print function matching the exact formatted reporting
   const handlePrint = () => {

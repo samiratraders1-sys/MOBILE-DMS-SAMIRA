@@ -508,22 +508,6 @@ export default function QuickActions({
 
           <button
             onClick={() => {
-              setActiveModal("sale");
-              setIsOpen(false);
-            }}
-            className="flex items-center gap-2.5 px-3 py-2.5 text-xs text-slate-800 hover:text-emerald-700 hover:bg-emerald-50 rounded-2xl font-bold transition-all text-left group cursor-pointer"
-          >
-            <div className="w-8 h-8 rounded-xl bg-emerald-50 group-hover:bg-emerald-100 flex items-center justify-center text-emerald-600 transition-colors">
-              <ShoppingBag className="w-4 h-4" />
-            </div>
-            <div>
-              <div className="font-extrabold text-[12px]">জরুরি বিক্রয় (Sale)</div>
-              <div className="text-[9px] text-gray-400 font-normal">সরাসরি ক্যাশ মেমো</div>
-            </div>
-          </button>
-
-          <button
-            onClick={() => {
               setActiveModal("purchase");
               setIsOpen(false);
             }}
@@ -558,19 +542,6 @@ export default function QuickActions({
 
       {/* Buttons container */}
       <div className="flex items-center gap-3">
-        {/* Direct Quick Sale Button */}
-        <button
-          onClick={() => {
-            setActiveModal("sale");
-            setIsOpen(false);
-          }}
-          className="h-14 px-5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-full flex items-center gap-2 shadow-2xl transition-all active:scale-95 duration-200 cursor-pointer border border-emerald-500 select-none"
-          title="কুইক সেল (Quick Sale)"
-        >
-          <ShoppingBag className="w-4 h-4 animate-bounce" />
-          <span>কুইক সেল (Quick Sale)</span>
-        </button>
-
         {/* Primary Floating Action Button */}
         <button
           id="quick-actions-fab"

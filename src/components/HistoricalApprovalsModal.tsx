@@ -35,6 +35,8 @@ export default function HistoricalApprovalsModal({
 }: HistoricalApprovalsModalProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [filterType, setFilterType] = useState<"all" | "sale" | "settlement" | "adjustment" | "payment">("all");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
 
   // Compile all approved adjustment records
   const allHistory = useMemo(() => {
@@ -150,7 +152,15 @@ export default function HistoricalApprovalsModal({
         return false;
       }
 
-      // 4. Search Filter (Search by transaction ID, entity name, description)
+      // 4. Date Range Filter
+      if (startDate && item.date < startDate) {
+        return false;
+      }
+      if (endDate && item.date > endDate) {
+        return false;
+      }
+
+      // 5. Search Filter (Search by transaction ID, entity name, description)
       const query = searchTerm.toLowerCase().trim();
       if (query) {
         const matchesQuery = 
@@ -166,22 +176,22 @@ export default function HistoricalApprovalsModal({
 
       return true;
     });
-  }, [allHistory, entityId, transactionId, filterType, searchTerm]);
+  }, [allHistory, entityId, transactionId, filterType, startDate, endDate, searchTerm]);
 
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fade-in">
-      <div className="bg-white rounded-3xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden border border-slate-100">
+      <div className="bg-white rounded-3xl w-full max-w-5xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden border border-slate-100">
         
         {/* Header */}
         <div className="bg-slate-900 text-white p-5 flex justify-between items-center shrink-0">
           <div className="flex items-center gap-2.5">
             <ShieldCheck className="w-6 h-6 text-indigo-400" />
             <div>
-              <h3 className="font-extrabold text-base">অনুমোদন ও সমন্বয় ইতিহাস (Historical Approvals)</h3>
+              <h3 className="font-extrabold text-base">অনুমোদন ও সমন্বয় ইতিহাস (Historical Approvals & Ledger History)</h3>
               <p className="text-[10px] text-slate-400">
-                {entityId ? "নির্দিষ্ট লেজারের সাথে সম্পর্কিত সকল অনুমোদিত হিসাবের তালিকা" : "সিস্টেমে অনুমোদিত ও সমন্বিত সকল ট্রানজেকশনের সম্পূর্ণ খতিয়ান ইতিহাস"}
+                {entityId ? "নির্দিষ্ট লেজারের সাথে সম্পর্কিত সকল অনুমোদিত হিসাবের তালিকা ও তারিখ ভিত্তিক সমন্বয়" : "সিস্টেমে অনুমোদিত ও সমন্বিত সকল ট্রানজেকশনের সম্পূর্ণ খতিয়ান ইতিহাস"}
               </p>
             </div>
           </div>
@@ -194,17 +204,45 @@ export default function HistoricalApprovalsModal({
         </div>
 
         {/* Filters Panel */}
-        <div className="p-4 bg-slate-50 border-b flex flex-col md:flex-row gap-3 shrink-0">
-          {/* Search box */}
-          <div className="relative flex-1">
-            <Search className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-            <input 
-              type="text"
-              value={searchTerm}
-              onChange={e => setSearchTerm(e.target.value)}
-              placeholder="ট্রানজেকশন আইডি, বিবরণ বা ইউজারের নাম দিয়ে খুঁজুন..."
-              className="w-full pl-10 pr-4 py-2 bg-white border border-gray-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-slate-950 transition-all"
-            />
+        <div className="p-4 bg-slate-50 border-b flex flex-col gap-3 shrink-0">
+          <div className="flex flex-col md:flex-row gap-3">
+            {/* Search box */}
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input 
+                type="text"
+                value={searchTerm}
+                onChange={e => setSearchTerm(e.target.value)}
+                placeholder="ট্রানজেকশন আইডি, বিবরণ বা ইউজারের নাম দিয়ে খুঁজুন..."
+                className="w-full pl-10 pr-4 py-2 bg-white border border-gray-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-slate-950 transition-all"
+              />
+            </div>
+
+            {/* Date Range Selectors */}
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-black text-slate-450 uppercase">তারিখ রেঞ্জ:</span>
+              <input 
+                type="date"
+                value={startDate}
+                onChange={e => setStartDate(e.target.value)}
+                className="bg-white border border-gray-200 rounded-xl px-2.5 py-1.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-slate-950"
+              />
+              <span className="text-gray-400 text-xs">থেকে</span>
+              <input 
+                type="date"
+                value={endDate}
+                onChange={e => setEndDate(e.target.value)}
+                className="bg-white border border-gray-200 rounded-xl px-2.5 py-1.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-slate-950"
+              />
+              {(startDate || endDate) && (
+                <button 
+                  onClick={() => { setStartDate(""); setEndDate(""); }}
+                  className="text-[10px] font-bold text-red-600 hover:underline px-1"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Type Filters */}

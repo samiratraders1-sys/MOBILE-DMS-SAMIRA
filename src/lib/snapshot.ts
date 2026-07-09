@@ -1,4 +1,4 @@
-import { db } from "./firebase";
+import { db, auth } from "./firebase";
 import { collection, getDocs } from "firebase/firestore";
 
 const COLLECTIONS_TO_SNAPSHOT = [
@@ -13,6 +13,25 @@ const COLLECTIONS_TO_SNAPSHOT = [
 
 export const snapshotAll = async () => {
     try {
+        const isDemoMode = localStorage.getItem("demo_user_session") !== null;
+        if (isDemoMode) {
+            console.log("Snapshot skipped: Demo mode active.");
+            return;
+        }
+
+        if (!auth.currentUser) {
+            console.log("Snapshot skipped: No authenticated user.");
+            return;
+        }
+
+        // Force-refresh or fetch the latest ID token to guarantee valid, non-expired credentials.
+        try {
+            await auth.currentUser.getIdToken(true);
+        } catch (authErr) {
+            console.warn("Snapshot skipped: Unable to refresh ID token for current user", authErr);
+            return;
+        }
+
         console.log("Snapshot: Running...");
         if (!db) {
             console.error("Firestore DB is not initialized yet");
