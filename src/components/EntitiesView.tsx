@@ -453,6 +453,12 @@ export default function EntitiesView({
       if (updateProduct) {
         for (const item of saleItems) {
           const deduction = (Number(item.totalPieces) || 0) + (Number(item.freeQty) || 0);
+          const prodObj = products.find(p => p.id === item.productId);
+          if (prodObj) {
+            await updateProduct(item.productId, {
+              stock: (prodObj.stock || 0) - deduction
+            });
+          }
           await recordStockMovement(item.productId, 'SALES', -deduction, "DIRECT_SALE_" + Date.now());
         }
       }

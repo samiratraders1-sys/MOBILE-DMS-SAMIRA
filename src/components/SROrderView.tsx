@@ -4,6 +4,7 @@ import toast from "react-hot-toast";
 import ThermalPrintTemplate from "./ThermalPrintTemplate";
 import { getGroupColors } from "../lib/utils";
 import { useFormAutoSave } from "../hooks/useFormAutoSave";
+import VoiceInputButton from "./VoiceInputButton";
 
 interface OrderProps {
   products: any[];
@@ -353,7 +354,7 @@ export default function SROrderView({ products, customers, routes, staff, addOrd
                     <input 
                       type="text" 
                       placeholder="কাস্টমার নাম, দোকান বা গ্রুপ দিয়ে খুঁজুন..." 
-                      className="w-full p-3 pl-10 border rounded-xl bg-[#F8F9FA] focus:ring-2 focus:ring-indigo-600 focus:outline-none focus:bg-white text-sm"
+                      className="w-full p-3 pl-10 pr-32 border rounded-xl bg-[#F8F9FA] focus:ring-2 focus:ring-indigo-600 focus:outline-none focus:bg-white text-sm"
                       value={customerSearchQuery}
                       onChange={e => {
                         setCustomerSearchQuery(e.target.value);
@@ -362,18 +363,27 @@ export default function SROrderView({ products, customers, routes, staff, addOrd
                       onFocus={() => setShowCustomerDropdown(true)}
                     />
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-                    {customerSearchQuery && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setCustomerSearchQuery("");
-                          setShowCustomerDropdown(false);
-                        }}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-750 text-xs font-bold"
-                      >
-                        মুছুন
-                      </button>
-                    )}
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
+                      {customerSearchQuery && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCustomerSearchQuery("");
+                            setShowCustomerDropdown(false);
+                          }}
+                          className="text-red-500 hover:text-red-750 text-xs font-bold mr-1"
+                        >
+                          মুছুন
+                        </button>
+                      )}
+                      <VoiceInputButton 
+                        onTranscript={(text) => {
+                          setCustomerSearchQuery(text);
+                          setShowCustomerDropdown(true);
+                        }} 
+                        placeholderName="কাস্টমার"
+                      />
+                    </div>
                   </div>
 
                   {/* Dropdown list of filtered results */}
@@ -614,10 +624,16 @@ export default function SROrderView({ products, customers, routes, staff, addOrd
             <input 
               type="text" 
               placeholder="পণ্য খুঁজুন..." 
-              className="w-full pl-10 pr-4 py-3 border rounded-xl"
+              className="w-full pl-10 pr-24 py-3 border rounded-xl"
               value={search}
               onChange={e => setSearch(e.target.value)}
             />
+            <div className="absolute right-2 top-1.5 flex items-center z-10 bg-inherit rounded-r-xl">
+              <VoiceInputButton 
+                onTranscript={(text) => setSearch(text)} 
+                placeholderName="পণ্য"
+              />
+            </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

@@ -240,6 +240,12 @@ export default function QuickActions({
       // 2. Adjust Product Inventory
       for (const item of saleTotals.items) {
         const totalOutput = (Number(item.totalPiecesItem) || 0) + (Number(item.freeQty) || 0);
+        const prodObj = products.find(p => p.id === item.productId);
+        if (prodObj && updateProduct) {
+          await updateProduct(item.productId, {
+            stock: (prodObj.stock || 0) - totalOutput
+          });
+        }
         await recordStockMovement(item.productId, 'SALES', -totalOutput, "QUICK_SALE_" + Date.now());
       }
 
@@ -393,6 +399,12 @@ export default function QuickActions({
 
       // 2. Adjust Product stock
       for (const item of purchaseTotals.items) {
+        const prodObj = products.find(p => p.id === item.productId);
+        if (prodObj && updateProduct) {
+          await updateProduct(item.productId, {
+            stock: (prodObj.stock || 0) + item.totalPiecesVal
+          });
+        }
         await recordStockMovement(item.productId, 'PURCHASE', item.totalPiecesVal, "QUICK_PURCHASE_" + Date.now());
       }
 

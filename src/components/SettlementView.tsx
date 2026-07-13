@@ -741,6 +741,11 @@ export default function SettlementView({
       for (const item of activeResults.items) {
         const product = products.find(p => p.id === item.productId);
         if (product && item.returns > 0) {
+          if (updateProduct) {
+            await updateProduct(product.id, {
+              stock: (product.stock || 0) + Number(item.returns)
+            });
+          }
           await recordStockMovement(product.id, 'RETURN', item.returns, activeSummary.id);
         }
       }

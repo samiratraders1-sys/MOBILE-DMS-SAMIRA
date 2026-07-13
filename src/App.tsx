@@ -1041,6 +1041,7 @@ export default function App() {
             loans={loans}
             returns={returns}
             transfers={transfers}
+            addDamage={damageInventory.add}
           />
         );
       case "dms-suite":

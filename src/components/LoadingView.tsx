@@ -163,6 +163,12 @@ export default function LoadingView({
 
       // Deduct inventory
       for (const item of cart) {
+        const prodObj = products.find(p => p.id === item.productId);
+        if (prodObj && updateProduct) {
+          await updateProduct(item.productId, {
+            stock: (prodObj.stock || 0) - Number(item.totalPieces)
+          });
+        }
         await recordStockMovement(item.productId, 'SALES', -item.totalPieces, "LOADING_SHEET_" + Date.now());
       }
 

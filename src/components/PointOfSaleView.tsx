@@ -7,6 +7,7 @@ import { useFormAutoSave } from "../hooks/useFormAutoSave";
 import { useConfirm } from "../context/ConfirmContext";
 import toast from "react-hot-toast";
 import ThermalPrintTemplate from "./ThermalPrintTemplate";
+import VoiceInputButton from "./VoiceInputButton";
 
 interface POSProps {
   products: any[];
@@ -90,6 +91,23 @@ export default function PointOfSaleView({
       if (saved.receivedAmount !== undefined) setReceivedAmount(saved.receivedAmount);
     }
   );
+
+  const handleCustomerVoiceSelect = (spokenText: string) => {
+    const query = spokenText.toLowerCase().trim();
+    const matched = customers.find(c => 
+      c.name?.toLowerCase().includes(query) || 
+      c.shopName?.toLowerCase().includes(query) ||
+      c.phone?.includes(query)
+    );
+    if (matched) {
+      setSelectedCustomer(matched.id);
+      toast.success(`কাস্টমার নির্বাচন করা হয়েছে: ${matched.name}`, { id: "customer-voice-select" });
+    } else {
+      setCustomCashName(spokenText);
+      setSelectedCustomer(""); // select cash customer
+      toast.success(`নগদ কাস্টমার নাম সেট করা হয়েছে: "${spokenText}"`, { id: "customer-voice-select" });
+    }
+  };
   
   // Checkout & receipt states
   const [activeReceipt, setActiveReceipt] = useState<any | null>(null);
@@ -318,6 +336,12 @@ export default function PointOfSaleView({
         if (updateProduct) {
           for (const item of totals.items) {
             const demandedAndFree = (Number(item.linePieces) || 0) + (Number(item.freeQty) || 0);
+            const pObj = products.find(p => p.id === item.productId);
+            if (pObj) {
+              await updateProduct(item.productId, {
+                stock: (pObj.stock || 0) - demandedAndFree
+              });
+            }
             await recordStockMovement(item.productId, 'SALES', -demandedAndFree, "POS_SALE_" + Date.now());
           }
         }
@@ -695,8 +719,14 @@ export default function PointOfSaleView({
               placeholder="পণ্য খুঁজুন বা সিলেক্ট করুন..."
               value={productSearch}
               onChange={(e) => setProductSearch(e.target.value)}
-              className="w-full pl-10 border rounded-xl p-2.5 text-sm font-medium focus:ring-2 focus:ring-black outline-none bg-gray-50 focus:bg-white transition-all"
+              className="w-full pl-10 pr-24 border rounded-xl p-2.5 text-sm font-medium focus:ring-2 focus:ring-black outline-none bg-gray-50 focus:bg-white transition-all"
             />
+            <div className="absolute right-2 top-1.5 flex items-center z-10 bg-inherit rounded-r-xl">
+              <VoiceInputButton 
+                onTranscript={(text) => setProductSearch(text)} 
+                placeholderName="পণ্য"
+              />
+            </div>
           </div>
           <div className="flex-1 overflow-y-auto space-y-2 pr-1.5 min-h-[300px]">
             {filteredProducts.map(p => (
@@ -737,7 +767,14 @@ export default function PointOfSaleView({
           {/* Customer Metadata selection */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border-b pb-4">
             <div>
-              <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">কাস্টমার নাম / নগদ</label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-400">কাস্টমার নাম / নগদ</label>
+                <VoiceInputButton 
+                  onTranscript={handleCustomerVoiceSelect} 
+                  placeholderName="কাস্টমার"
+                  className="scale-90"
+                />
+              </div>
               <select
                 value={selectedCustomer}
                 onChange={(e) => setSelectedCustomer(e.target.value)}
@@ -749,13 +786,21 @@ export default function PointOfSaleView({
                   ))}
               </select>
               {isCashCustomer && (
-                <input
-                  type="text"
-                  placeholder="নগদ কাস্টমারের নাম লিখুন (ঐচ্ছিক)"
-                  value={customCashName}
-                  onChange={(e) => setCustomCashName(e.target.value)}
-                  className="w-full mt-2 p-2 border rounded-xl text-xs font-semibold focus:ring-2 focus:ring-black outline-none"
-                />
+                <div className="relative mt-2">
+                  <input
+                    type="text"
+                    placeholder="নগদ কাস্টমারের নাম লিখুন (ঐচ্ছিক)"
+                    value={customCashName}
+                    onChange={(e) => setCustomCashName(e.target.value)}
+                    className="w-full p-2 pr-24 border rounded-xl text-xs font-semibold focus:ring-2 focus:ring-black outline-none"
+                  />
+                  <div className="absolute right-2 top-1 flex items-center z-10 bg-inherit rounded-r-xl scale-90">
+                    <VoiceInputButton 
+                      onTranscript={(text) => setCustomCashName(text)} 
+                      placeholderName="নাম"
+                    />
+                  </div>
+                </div>
               )}
             </div>
 

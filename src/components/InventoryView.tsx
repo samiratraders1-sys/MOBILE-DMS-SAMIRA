@@ -346,6 +346,7 @@ export default function InventoryView({ products, add, update, remove, suppliers
     const formData = new FormData(e.currentTarget);
     const product = {
       name: formData.get("name") as string,
+      description: formData.get("description") as string || "",
       sku: (formData.get("sku") as string || "").trim(),
       barcode: formData.get("barcode") as string || "",
       brand: formData.get("brand") as string || "",
@@ -401,6 +402,7 @@ export default function InventoryView({ products, add, update, remove, suppliers
       } else {
         const newId = await add({
             name: product.name,
+            description: product.description,
             sku: product.sku,
             barcode: product.barcode,
             brand: product.brand,
@@ -1210,6 +1212,10 @@ export default function InventoryView({ products, add, update, remove, suppliers
                     <div className="md:col-span-3">
                       <label className="block text-xs font-bold text-gray-700 mb-1">পণ্যের নাম *</label>
                       <input name="name" defaultValue={editingProduct?.name} required placeholder="যেমন: Pran Mango Juice 250ml" className="w-full border rounded-xl p-2.5 text-sm bg-gray-50 focus:bg-white focus:ring-1 focus:ring-blue-500 outline-none transition" />
+                    </div>
+                    <div className="md:col-span-3">
+                      <label className="block text-xs font-bold text-gray-700 mb-1">পণ্যের বিবরণ (Description)</label>
+                      <textarea name="description" defaultValue={editingProduct?.description} placeholder="পণ্যের বিবরণ লিখুন..." rows={2} className="w-full border rounded-xl p-2.5 text-sm bg-gray-50 focus:bg-white focus:ring-1 focus:ring-blue-500 outline-none transition" />
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-gray-700 mb-1">বারকোড (Barcode)</label>

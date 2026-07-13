@@ -26,6 +26,7 @@ interface AdvancedOpsViewProps {
   loans: { data: any[]; add: (item: any) => Promise<any>; remove: (id: string) => Promise<void>; update: (id: string, item: any) => Promise<void> };
   returns: { data: any[]; add: (item: any) => Promise<any>; remove: (id: string) => Promise<void> };
   transfers: { data: any[]; add: (item: any) => Promise<any>; remove: (id: string) => Promise<void> };
+  addDamage?: (item: any) => Promise<any>;
 }
 
 export default function AdvancedOpsView({
@@ -42,7 +43,8 @@ export default function AdvancedOpsView({
   fixedAssets,
   loans,
   returns,
-  transfers
+  transfers,
+  addDamage,
 }: AdvancedOpsViewProps) {
   const [activeTab, setActiveTab] = useState<"production" | "transfer" | "returns" | "hrm" | "assets">("production");
 
@@ -77,6 +79,7 @@ export default function AdvancedOpsView({
   const [retRefund, setRetRefund] = useState(0);
   const [retExchangeProdId, setRetExchangeProdId] = useState(""); // exchange option
   const [retExchangeQty, setRetExchangeQty] = useState(0);
+  const [isDamage, setIsDamage] = useState(false);
 
   // --- SUB MODULE 4: HRM & PAYROLL STATES ---
   const [showAttendanceModal, setShowAttendanceModal] = useState(false);
@@ -251,9 +254,29 @@ export default function AdvancedOpsView({
 
     try {
       if (retType === "sales_return") {
-        // Customer returned product -> add back to principal stock
-        if (prod) {
-          await recordStockMovement(retProductId, 'RETURN', retQty, "SALES_RETURN_" + Date.now());
+        if (isDamage) {
+          // Customer returned damaged product -> add to damage inventory, NOT to principal warehouse stock
+          if (addDamage) {
+            await addDamage({
+              productId: retProductId,
+              supplierId: prod?.supplierId || "unknown",
+              quantity: retQty,
+              price: prod?.cost || prod?.price || 0,
+              date: new Date().toISOString().split('T')[0],
+              notes: `কাস্টমার বিক্রয় ফেরত (ড্যামেজ) - কাস্টমার: ${customers.find(c => c.id === retPartyId)?.name || "Unknown Customer"}`
+            });
+          }
+          if (prod) {
+            await recordStockMovement(retProductId, 'RETURN', retQty, "SALES_RETURN_DAMAGE_" + Date.now());
+          }
+        } else {
+          // Customer returned good product -> add back to principal warehouse stock
+          if (prod && updateProduct) {
+            await updateProduct(retProductId, {
+              stock: (prod.stock || 0) + retQty
+            });
+            await recordStockMovement(retProductId, 'RETURN', retQty, "SALES_RETURN_" + Date.now());
+          }
         }
         
         // If there's an exchange item
@@ -262,7 +285,10 @@ export default function AdvancedOpsView({
           if (exProd && (exProd.stock || 0) < retExchangeQty) {
             throw new Error(`এক্সচেঞ্জ পণ্য "${exProd.name}" এর প্রয়োজনীয় পরিমাণ স্টক নেই`);
           }
-          if (exProd) {
+          if (exProd && updateProduct) {
+            await updateProduct(retExchangeProdId, {
+              stock: (exProd.stock || 0) - retExchangeQty
+            });
             await recordStockMovement(retExchangeProdId, 'SALES', -retExchangeQty, "EXCHANGE_OUT_" + Date.now());
           }
         }
@@ -278,17 +304,21 @@ export default function AdvancedOpsView({
           exchangeProductId: retExchangeProdId || null,
           exchangeProductName: products.find(p => p.id === retExchangeProdId)?.name || null,
           exchangeQty: retExchangeQty,
+          isDamage: isDamage,
           date: new Date().toISOString()
         });
 
-        toast.success("কাস্টমার সেলস রিটার্ন ও এক্সচেঞ্জ সফলভাবে সম্পন্ন!");
+        toast.success(isDamage ? "কাস্টমার ড্যামেজ সেলস রিটার্ন সফলভাবে সম্পন্ন!" : "কাস্টমার সেলস রিটার্ন ও এক্সচেঞ্জ সফলভাবে সম্পন্ন!");
 
       } else {
         // Purchase return to Supplier -> deduct from local product stock
         if (prod && (prod.stock || 0) < retQty) {
           throw new Error("সাপ্লায়ারকে ফেরত দেওয়ার মত যথেষ্ট পণ্য ইনভেন্টরিতে নেই!");
         }
-        if (prod) {
+        if (prod && updateProduct) {
+          await updateProduct(retProductId, {
+            stock: (prod.stock || 0) - retQty
+          });
           await recordStockMovement(retProductId, 'RETURN', -retQty, "PURCHASE_RETURN_" + Date.now());
         }
 
@@ -313,6 +343,7 @@ export default function AdvancedOpsView({
       setRetRefund(0);
       setRetExchangeProdId("");
       setRetExchangeQty(0);
+      setIsDamage(false);
     } catch (e: any) {
       toast.error(e.message || "রিটার্ন প্রসেস ব্যর্থ হয়েছে");
     }
@@ -1489,6 +1520,21 @@ export default function AdvancedOpsView({
                   className="w-full p-2.5 rounded-xl border text-xs"
                 />
               </div>
+
+              {retType === "sales_return" && (
+                <div className="flex items-center gap-2 p-1 bg-amber-50 border border-amber-200 rounded-xl">
+                  <input
+                    type="checkbox"
+                    id="is_damage_return_checkbox"
+                    checked={isDamage}
+                    onChange={(e) => setIsDamage(e.target.checked)}
+                    className="w-4 h-4 text-amber-600 border-gray-300 rounded focus:ring-amber-500 cursor-pointer"
+                  />
+                  <label htmlFor="is_damage_return_checkbox" className="text-xs font-bold text-amber-800 cursor-pointer select-none">
+                    এটি কি ড্যামেজ পণ্য? (ড্যামেজ রিটার্ন হলে মেইন স্টক বাড়বে না, ড্যামেজ ইনভেন্টরিতে যোগ হবে)
+                  </label>
+                </div>
+              )}
 
               {retType === "sales_return" && (
                 <div className="border-t border-gray-150 pt-2 space-y-2">

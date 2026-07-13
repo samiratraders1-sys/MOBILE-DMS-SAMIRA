@@ -117,6 +117,12 @@ export default function PurchaseView({
     for (const item of items) {
         const totalPurchased = (item.carton || 0) * (item.piecesInCarton || 1) + (item.pieces || 0);
         console.log(`Updating product ${item.id}: adding ${totalPurchased} to inventory`);
+        const productObj = products.find(p => p.id === item.id);
+        if (productObj && updateProduct) {
+          await updateProduct(item.id, {
+            stock: (productObj.stock || 0) + totalPurchased
+          });
+        }
         await recordStockMovement(item.id, 'PURCHASE', totalPurchased, invoiceId);
     }
 
