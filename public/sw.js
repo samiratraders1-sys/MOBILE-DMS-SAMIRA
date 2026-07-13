@@ -31,6 +31,16 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   
+  // Only handle local GET requests, bypass non-GET completely to prevent issues with POST requests in webviews
+  if (event.request.method !== 'GET') {
+    return;
+  }
+
+  // Bypass API calls completely to ensure we always fetch live data from the server
+  if (url.pathname.startsWith('/api/')) {
+    return;
+  }
+
   // Only handle local requests, bypass third-party APIs (Google Maps, Firebase realtime web channels)
   if (url.origin !== self.location.origin) {
     return;
