@@ -13,6 +13,36 @@
           }
         } catch (e) {}
       })();
+
+      window.onerror = function(message, source, lineno, colno, error) {
+        fetch("/api/log-error", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: "onerror",
+            message: message,
+            source: source,
+            lineno: lineno,
+            colno: colno,
+            stack: error ? error.stack : null,
+            userAgent: navigator.userAgent
+          })
+        }).catch(err => console.error("Error reporting failed:", err));
+        return false;
+      };
+
+      window.onunhandledrejection = function(event) {
+        fetch("/api/log-error", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: "onunhandledrejection",
+            message: event.reason ? event.reason.message || String(event.reason) : "Unhandled Rejection",
+            stack: event.reason ? event.reason.stack : null,
+            userAgent: navigator.userAgent
+          })
+        }).catch(err => console.error("Rejection reporting failed:", err));
+      };
     </script>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='black'/><path d='M30 30h40v40H30z' fill='white'/></svg>">
 

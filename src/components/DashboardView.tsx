@@ -28,6 +28,16 @@ interface DashboardProps {
   setActiveView: (view: string) => void;
   role?: string;
   allowedViews?: string[];
+
+  // Additional props for 100% ERP Reconciliation Audit
+  staff?: any[];
+  accounts?: any[];
+  damageInventory?: any[];
+  supplierClaims?: any[];
+  stockAdjustments?: any[];
+  updateCustomer?: (id: string, data: any) => Promise<any>;
+  updateSupplier?: (id: string, data: any) => Promise<any>;
+  updateStaff?: (id: string, data: any) => Promise<any>;
 }
 
 export default function DashboardView(props: DashboardProps) {
@@ -43,6 +53,14 @@ export default function DashboardView(props: DashboardProps) {
   const subDbs = Array.isArray(props.subDbs) ? props.subDbs : [];
   const subDbShipments = Array.isArray(props.subDbShipments) ? props.subDbShipments : [];
   const expenses = Array.isArray(props.expenses) ? props.expenses : [];
+
+  const staff = Array.isArray(props.staff) ? props.staff : [];
+  const accounts = Array.isArray(props.accounts) ? props.accounts : [];
+  const damageInventory = Array.isArray(props.damageInventory) ? props.damageInventory : [];
+  const supplierClaims = Array.isArray(props.supplierClaims) ? props.supplierClaims : [];
+  const stockAdjustments = Array.isArray(props.stockAdjustments) ? props.stockAdjustments : [];
+  const { updateCustomer, updateSupplier, updateStaff } = props;
+
   const { setActiveView, role, allowedViews } = props;
   const { language, t, formatNumber } = useLanguage();
   const [aiInsight, setAiInsight] = useState<string | null>(null);
@@ -50,7 +68,7 @@ export default function DashboardView(props: DashboardProps) {
   const [showAuditModal, setShowAuditModal] = useState(false);
   const [dailyTimeframe, setDailyTimeframe] = useState<"7" | "30">("30");
   const [inventoryFilter, setInventoryFilter] = useState<"all" | "low" | "out">("all");
-  const [hubActiveTab, setHubActiveTab] = useState<"workspace" | "data-entry" | "reports">("workspace");
+  const [hubActiveTab, setHubActiveTab] = useState<"workspace" | "data-entry" | "reports" | "reconciliation">("workspace");
   const [drillDownStat, setDrillDownStat] = useState<string | null>(null);
 
   const [isOnline, setIsOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true);
@@ -310,6 +328,129 @@ export default function DashboardView(props: DashboardProps) {
       totalDiscountCount 
     };
   }, [products, summaries, sales, payments, subDbShipments, expenses]);
+
+  const reconciliationMetrics = useMemo(() => {
+    // 1. Inventory Value (ইনভেন্টরি পণ্যের মূল্য)
+    const totalInventoryValue = products.reduce((sum, p) => sum + (Number(p.stock || 0) * Number(p.purchasePrice || p.price || 0)), 0);
+
+    // 2. Cash/Bank (হাতে নগদ ও ব্যাংক ক্যাশ)
+    const totalCashValue = accounts.reduce((sum, a) => sum + Number(a.balance || 0), 0);
+
+    // 3. Customer Credit (কাস্টমার বকেয়া/বাকি)
+    const totalCustomerCredit = customers.reduce((sum, c) => sum + Number(c.balance || 0), 0);
+
+    // 4. Damage Stock Value (ড্যামেজ পণ্য স্টক মূল্য)
+    const totalDamageValue = damageInventory.reduce((sum, d) => sum + (Number(d.quantity || 0) * Number(d.price || 0)), 0);
+
+    // 5. Total Discounts Given (মোট কাস্টমার ডিসকাউন্ট)
+    const totalDiscounts = summaries.reduce((sum, s) => sum + Number(s.totalDiscountValue || s.discountItems?.reduce((subSum: number, item: any) => subSum + (Number(item.discount || 0)), 0) || 0), 0) + 
+                          sales.reduce((sum, s) => sum + (s.items || []).reduce((sub, i) => sub + Number(i.discount || 0), 0), 0);
+
+    // 6. Free Products Value (মোট ফ্রি পণ্য বিতরণ)
+    const totalFreeProductsValue = summaries.reduce((sum, s) => sum + Number(s.totalFreeValue || s.freeItems?.reduce((subSum: number, item: any) => subSum + (Number(item.quantity || 0) * Number(item.price || 0)), 0) || 0), 0) + 
+                                  sales.reduce((sum, s) => sum + (s.items || []).reduce((sub, i) => sub + (Number(i.freeQty || 0) * Number(i.rate || 0)), 0), 0);
+
+    // 7. Expenses (মোট ব্যয়/খরচ)
+    const totalExpensesValue = expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
+
+    // 8. Supplier Claims (সাপ্লায়ার ক্লেম ও ফেরত)
+    const totalSupplierClaimsValue = supplierClaims.reduce((sum, c) => sum + Number(c.amount || 0), 0);
+
+    // 9. Staff Salary Advance (স্টাফ বেতন অগ্রিম)
+    const totalSalaryAdvancesValue = staff.reduce((sum, s) => sum + (Number(s.balance || 0) < 0 ? Math.abs(Number(s.balance || 0)) : 0), 0);
+
+    // 10. Adjustments (মোট স্টক ও একাউন্ট সমন্বয় মূল্য)
+    const totalAdjustmentsValue = stockAdjustments.reduce((sum, a) => sum + (Number(a.quantity || 0) * Number(a.price || 0)), 0);
+
+    // Total sales revenue for matching
+    const totalSalesRevenueValue = summaries.reduce((sum, s) => sum + Number(s.salesValue || 0), 0) + 
+                                   sales.reduce((sum, s) => sum + Number(s.totalAmount || s.grandTotal || 0), 0);
+
+    // Total supplier payables (সাপ্লায়ার বকেয়া)
+    const totalSupplierPayablesValue = suppliers.reduce((sum, s) => sum + (Number(s.balance || 0) > 0 ? Number(s.balance || 0) : 0), 0);
+
+    // Total left-side (total assets + expenses + values)
+    const totalDebitSide = totalInventoryValue + totalCashValue + totalCustomerCredit + totalDamageValue + totalDiscounts + totalFreeProductsValue + totalExpensesValue + totalSupplierClaimsValue + totalSalaryAdvancesValue + totalAdjustmentsValue;
+
+    // Total right-side (revenue + payables + other income)
+    const totalOthersIncomeValue = payments.filter((p: any) => p.type === 'in' && p.category === 'Others Income').reduce((sum: number, p: any) => sum + (p.amount || 0), 0);
+    
+    const theoreticalCreditSide = totalSalesRevenueValue + totalSupplierPayablesValue + totalOthersIncomeValue;
+    const difference = Math.abs(totalDebitSide - theoreticalCreditSide);
+
+    return {
+      totalInventoryValue,
+      totalCashValue,
+      totalCustomerCredit,
+      totalDamageValue,
+      totalDiscounts,
+      totalFreeProductsValue,
+      totalExpensesValue,
+      totalSupplierClaimsValue,
+      totalSalaryAdvancesValue,
+      totalAdjustmentsValue,
+      totalSalesRevenueValue,
+      totalSupplierPayablesValue,
+      totalOthersIncomeValue,
+      totalDebitSide,
+      theoreticalCreditSide,
+      difference
+    };
+  }, [products, summaries, customers, suppliers, purchases, routes, payments, sales, expenses, staff, accounts, damageInventory, supplierClaims, stockAdjustments]);
+
+  const [isHealing, setIsHealing] = useState(false);
+
+  const handleSelfHealing = async () => {
+    setIsHealing(true);
+    const loadToast = toast.loading("ডাটাবেজ রি-ক্যালকুলেশন ও সেলফ-হিলিং সক্রিয় হচ্ছে...");
+    try {
+      // 1. Re-calculate customer balances based on payments and order summaries
+      for (const cust of customers) {
+        let actualBalance = 0;
+        const creditSum = summaries
+          .filter(s => s.status === 'settled' && Array.isArray(s.credits))
+          .reduce((sum, s) => {
+            const custCredit = s.credits.find((c: any) => c.customerId === cust.id);
+            return sum + (custCredit ? Number(custCredit.amount || 0) : 0);
+          }, 0);
+        
+        const paymentSum = payments
+          .filter(p => p.customerId === cust.id && p.type === 'in' && p.category === 'Customer Due Collection' && p.status !== 'pending_approval')
+          .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+
+        actualBalance = creditSum - paymentSum;
+        
+        if (updateCustomer && Math.abs((cust.balance || 0) - actualBalance) > 1) {
+          await updateCustomer(cust.id, { balance: actualBalance });
+        }
+      }
+
+      // 2. Re-calculate staff balances
+      for (const st of staff) {
+        let actualBalance = 0;
+        const totalSummariesPayable = summaries
+          .filter(s => s.dsrId === st.id && s.status === 'settled')
+          .reduce((sum, s) => sum + Number(s.dsrPayable || 0), 0);
+
+        const totalStaffPaymentsHandover = summaries
+          .filter(s => s.dsrId === st.id && s.status === 'settled')
+          .reduce((sum, s) => sum + Number(s.totalPayments || 0), 0);
+
+        actualBalance = totalSummariesPayable - totalStaffPaymentsHandover;
+
+        if (updateStaff && Math.abs((st.balance || 0) - actualBalance) > 1) {
+          await updateStaff(st.id, { balance: actualBalance });
+        }
+      }
+
+      toast.success("ইআরপি ডাটাবেজ সমতা ও Ledger Balances সফলভাবে রি-সিঙ্ক ও সেলফ-হিল করা হয়েছে!", { id: loadToast });
+    } catch (err) {
+      console.error(err);
+      toast.error("সেলফ-হিলিংয়ের সময় সমস্যা হয়েছে।", { id: loadToast });
+    } finally {
+      setIsHealing(false);
+    }
+  };
 
   const { totalSalesValue, netProfit, profitMargin, totalExpenses, totalReturnVal, totalFreeCount, totalDiscountCount } = kpiValues;
 
@@ -1403,6 +1544,17 @@ export default function DashboardView(props: DashboardProps) {
               <TrendingUp className="w-3.5 h-3.5" />
               বিজনেস রিপোর্ট ডেস্ক (Reports Desk)
             </button>
+            <button
+              onClick={() => setHubActiveTab("reconciliation")}
+              className={`flex items-center gap-2 px-5 py-2.5 text-xs font-black rounded-xl transition-all cursor-pointer ${
+                hubActiveTab === "reconciliation" 
+                  ? "bg-emerald-600 text-white shadow-sm" 
+                  : "text-emerald-600 hover:text-emerald-950 hover:bg-emerald-50"
+              }`}
+            >
+              <ShieldCheck className="w-3.5 h-3.5" />
+              ১০০% রিকনসিলিয়েশন ডেস্ক (100% Audit)
+            </button>
           </div>
         </div>
 
@@ -1812,6 +1964,168 @@ export default function DashboardView(props: DashboardProps) {
                   <p className="text-xs font-semibold text-slate-400 mt-1 leading-relaxed">অনুমোদিত যেকোনো পেমেন্ট কালেকশন, কাস্টমার জমা বা বিবিধ ব্যয়ের সর্বমোট ট্রানজেকশন তালিকা।</p>
                 </div>
               </motion.div>
+            </div>
+          )}
+
+          {hubActiveTab === "reconciliation" && (
+            <div className="space-y-6">
+              {/* Introduction Banner */}
+              <div className="bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-150 p-6 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-5 shadow-xs">
+                <div className="flex gap-4 items-start">
+                  <div className="p-3 bg-emerald-100 text-emerald-800 rounded-2xl shrink-0 flex items-center justify-center">
+                    <ShieldCheck className="w-6 h-6 text-emerald-600 animate-pulse" />
+                  </div>
+                  <div className="space-y-1">
+                    <h4 className="font-extrabold text-lg text-emerald-950 flex items-center gap-2">
+                      রিয়েল-টাইম ১০০% ইআরপি রিকনসিলিয়েশন ও অডিট ডেস্ক (100% Financial Reconciliation Desk)
+                    </h4>
+                    <p className="text-emerald-850 text-sm leading-relaxed font-semibold">
+                      Inventory, Cash, Customer Credit, Damage, Discount, Free Product, Expense, Claims, Salary Advance & Adjustments এর শতভাগ নির্ভুল সমতা ও লেনদেনের নির্ভুলতা রক্ষা করুন।
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSelfHealing}
+                  disabled={isHealing}
+                  className={`flex items-center justify-center gap-2 px-5 py-3 rounded-2xl text-xs font-black transition-all border shadow-sm active:scale-95 shrink-0 cursor-pointer duration-100 ${
+                    isHealing 
+                      ? "bg-emerald-100 text-emerald-400 border-emerald-250 cursor-not-allowed" 
+                      : "bg-emerald-600 hover:bg-emerald-700 text-white border-transparent"
+                  }`}
+                >
+                  <RefreshCw className={`w-4 h-4 ${isHealing ? "animate-spin" : ""}`} />
+                  {isHealing ? "ডাটাবেজ সেলফ-হিলিং হচ্ছে..." : "অটো-ব্যালেন্স ও সেলফ-হিলিং (Self-Healing Auto-Fix)"}
+                </button>
+              </div>
+
+              {/* Status Indicator Bar */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-xs flex items-center gap-4">
+                  <div className={`p-4 rounded-xl shrink-0 ${reconciliationMetrics.difference < 50 ? "bg-emerald-50 text-emerald-600" : "bg-amber-50 text-amber-600"}`}>
+                    <CheckCircle className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">ইআরপি সমতা স্টেটাস</span>
+                    <span className={`text-base font-black ${reconciliationMetrics.difference < 50 ? "text-emerald-700" : "text-amber-700"}`}>
+                      {reconciliationMetrics.difference < 50 ? "১০০% সামঞ্জস্যপূর্ণ (Perfectly Balanced)" : "সমন্বয় প্রয়োজন (Drift Detected)"}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-xs flex items-center gap-4">
+                  <div className="p-4 rounded-xl bg-indigo-50 text-indigo-600 shrink-0">
+                    <Layers className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">মোট ডেবিট (Assets + Expenses)</span>
+                    <span className="text-base font-black text-indigo-950">
+                      {formatCurrency(reconciliationMetrics.totalDebitSide)}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-xs flex items-center gap-4">
+                  <div className="p-4 rounded-xl bg-violet-50 text-violet-600 shrink-0">
+                    <TrendingUp className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">মোট ক্রেডিট (Revenue + Liabilities)</span>
+                    <span className="text-base font-black text-violet-950">
+                      {formatCurrency(reconciliationMetrics.theoreticalCreditSide)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* 10 parameters grid breakdown */}
+              <div>
+                <h3 className="text-base font-black text-slate-900 mb-4 flex items-center gap-2">
+                  <Plus className="w-5 h-5 text-indigo-600" /> ১০টি রিকনসিলিয়েশন ইন্ডিকেটর ব্রেকডাউন (10 ERP Balancing Assets)
+                </h3>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+                  {/* Item 1: Inventory */}
+                  <div className="bg-white p-5 rounded-2xl border border-slate-150 shadow-2xs hover:shadow-sm transition-all">
+                    <span className="px-2 py-0.5 bg-blue-50 text-blue-700 text-[9px] font-black rounded-md uppercase tracking-wider">১. Inventory Value</span>
+                    <h4 className="text-sm font-black text-slate-900 mt-2">পণ্যের মজুদ মূল্য</h4>
+                    <p className="text-lg font-black text-blue-700 mt-1">{formatCurrency(reconciliationMetrics.totalInventoryValue)}</p>
+                    <p className="text-[10px] text-slate-400 font-semibold mt-1">মজুদ পণ্যের ক্রয় রেট অনুযায়ী সর্বমোট নেট মূল্য</p>
+                  </div>
+
+                  {/* Item 2: Cash/Bank */}
+                  <div className="bg-white p-5 rounded-2xl border border-slate-150 shadow-2xs hover:shadow-sm transition-all">
+                    <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 text-[9px] font-black rounded-md uppercase tracking-wider">২. Cash & Bank</span>
+                    <h4 className="text-sm font-black text-slate-900 mt-2">হাতে নগদ ও ব্যাংক ক্যাশ</h4>
+                    <p className="text-lg font-black text-emerald-700 mt-1">{formatCurrency(reconciliationMetrics.totalCashValue)}</p>
+                    <p className="text-[10px] text-slate-400 font-semibold mt-1">নগদ তহবিল ও ব্যাংক একাউন্টের মোট সমন্বয় ব্যালেন্স</p>
+                  </div>
+
+                  {/* Item 3: Customer Credit */}
+                  <div className="bg-white p-5 rounded-2xl border border-slate-150 shadow-2xs hover:shadow-sm transition-all">
+                    <span className="px-2 py-0.5 bg-rose-50 text-rose-700 text-[9px] font-black rounded-md uppercase tracking-wider">৩. Customer Credit</span>
+                    <h4 className="text-sm font-black text-slate-900 mt-2">কাস্টমার বকেয়া (বাকি)</h4>
+                    <p className="text-lg font-black text-rose-700 mt-1">{formatCurrency(reconciliationMetrics.totalCustomerCredit)}</p>
+                    <p className="text-[10px] text-slate-400 font-semibold mt-1">কাস্টমারদের নিকট অবিক্রীত বা বাকী চালানের মোট পাওনা</p>
+                  </div>
+
+                  {/* Item 4: Damage */}
+                  <div className="bg-white p-5 rounded-2xl border border-slate-150 shadow-2xs hover:shadow-sm transition-all">
+                    <span className="px-2 py-0.5 bg-amber-50 text-amber-700 text-[9px] font-black rounded-md uppercase tracking-wider">৪. Damage Value</span>
+                    <h4 className="text-sm font-black text-slate-900 mt-2">ড্যামেজ পণ্য খতিয়ান</h4>
+                    <p className="text-lg font-black text-amber-700 mt-1">{formatCurrency(reconciliationMetrics.totalDamageValue)}</p>
+                    <p className="text-[10px] text-slate-400 font-semibold mt-1">নষ্ট ও বিক্রয় অযোগ্য পণ্যের ড্যামেজ ইনভেন্টরি স্টক মূল্য</p>
+                  </div>
+
+                  {/* Item 5: Discount */}
+                  <div className="bg-white p-5 rounded-2xl border border-slate-150 shadow-2xs hover:shadow-sm transition-all">
+                    <span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 text-[9px] font-black rounded-md uppercase tracking-wider">৫. Discounts</span>
+                    <h4 className="text-sm font-black text-slate-900 mt-2">মোট ডিসকাউন্ট দেওয়া</h4>
+                    <p className="text-lg font-black text-indigo-700 mt-1">{formatCurrency(reconciliationMetrics.totalDiscounts)}</p>
+                    <p className="text-[10px] text-slate-400 font-semibold mt-1">চালান ও বিকেল বন্টনে কাস্টমারদের দেওয়া মোট ছাড়</p>
+                  </div>
+
+                  {/* Item 6: Free Product */}
+                  <div className="bg-white p-5 rounded-2xl border border-slate-150 shadow-2xs hover:shadow-sm transition-all">
+                    <span className="px-2 py-0.5 bg-teal-50 text-teal-700 text-[9px] font-black rounded-md uppercase tracking-wider">৬. Free Items</span>
+                    <h4 className="text-sm font-black text-slate-900 mt-2">ফ্রি পণ্য বিতরণ মূল্য</h4>
+                    <p className="text-lg font-black text-teal-700 mt-1">{formatCurrency(reconciliationMetrics.totalFreeProductsValue)}</p>
+                    <p className="text-[10px] text-slate-400 font-semibold mt-1">প্রোমোশনাল স্কিমে দেওয়া ফ্রি আইটেমের মোট মূল্য</p>
+                  </div>
+
+                  {/* Item 7: Expense */}
+                  <div className="bg-white p-5 rounded-2xl border border-slate-150 shadow-2xs hover:shadow-sm transition-all">
+                    <span className="px-2 py-0.5 bg-slate-100 text-slate-700 text-[9px] font-black rounded-md uppercase tracking-wider">৭. Route Expenses</span>
+                    <h4 className="text-sm font-black text-slate-900 mt-2">মোট অফিস ও রুট খরচ</h4>
+                    <p className="text-lg font-black text-slate-700 mt-1">{formatCurrency(reconciliationMetrics.totalExpensesValue)}</p>
+                    <p className="text-[10px] text-slate-400 font-semibold mt-1">রুট ও বিবিধ ব্যয় খতিয়ানে এন্ট্রি করা মোট খরচ</p>
+                  </div>
+
+                  {/* Item 8: Supplier Claim */}
+                  <div className="bg-white p-5 rounded-2xl border border-slate-150 shadow-2xs hover:shadow-sm transition-all">
+                    <span className="px-2 py-0.5 bg-cyan-50 text-cyan-700 text-[9px] font-black rounded-md uppercase tracking-wider">৮. Supplier Claims</span>
+                    <h4 className="text-sm font-black text-slate-900 mt-2">সাপ্লায়ার ক্লেম ও পাওনা</h4>
+                    <p className="text-lg font-black text-cyan-700 mt-1">{formatCurrency(reconciliationMetrics.totalSupplierClaimsValue)}</p>
+                    <p className="text-[10px] text-slate-400 font-semibold mt-1">ড্যামেজ বা অন্যান্য কারণে কোম্পানি থেকে মোট রিফান্ড ক্লেম</p>
+                  </div>
+
+                  {/* Item 9: Salary Advance */}
+                  <div className="bg-white p-5 rounded-2xl border border-slate-150 shadow-2xs hover:shadow-sm transition-all">
+                    <span className="px-2 py-0.5 bg-violet-50 text-violet-700 text-[9px] font-black rounded-md uppercase tracking-wider">৯. Staff Advance</span>
+                    <h4 className="text-sm font-black text-slate-900 mt-2">স্টাফ বেতন অগ্রিম</h4>
+                    <p className="text-lg font-black text-violet-700 mt-1">{formatCurrency(reconciliationMetrics.totalSalaryAdvancesValue)}</p>
+                    <p className="text-[10px] text-slate-400 font-semibold mt-1">স্টাফ বা ডিএসআরদের দেওয়া মোট ঋণ ও স্যালারি এডভান্স</p>
+                  </div>
+
+                  {/* Item 10: Adjustment */}
+                  <div className="bg-white p-5 rounded-2xl border border-slate-150 shadow-2xs hover:shadow-sm transition-all">
+                    <span className="px-2 py-0.5 bg-pink-50 text-pink-700 text-[9px] font-black rounded-md uppercase tracking-wider">১০. Adjustments</span>
+                    <h4 className="text-sm font-black text-slate-900 mt-2">স্টক ও ব্যালেন্স সমন্বয়</h4>
+                    <p className="text-lg font-black text-pink-700 mt-1">{formatCurrency(reconciliationMetrics.totalAdjustmentsValue)}</p>
+                    <p className="text-[10px] text-slate-400 font-semibold mt-1">ইনভেন্টরি অডিট ও হিসাবের সময় সমন্বয় করা মোট মূল্য</p>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
         </div>

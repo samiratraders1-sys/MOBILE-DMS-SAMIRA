@@ -307,3 +307,92 @@ export async function syncExistingToTransactions(
     }
   }
 }
+
+export interface DriftReport {
+  id: string;
+  name: string;
+  type: "customer" | "supplier" | "staff";
+  calculatedBalance: number;
+  savedBalance: number;
+  drift: number;
+}
+
+/**
+ * Background worker to check transaction drift
+ * Specifically flags any transaction drift (calculated balance != saved balance)
+ */
+export function checkTransactionDrift(
+  customers: any[],
+  suppliers: any[],
+  staff: any[],
+  transactions: any[],
+  products: any[]
+): {
+  drifts: DriftReport[];
+  totalDriftAmount: number;
+  hasDrift: boolean;
+} {
+  const drifts: DriftReport[] = [];
+  let totalDriftAmount = 0;
+
+  // 1. Check Customers
+  (customers || []).forEach(c => {
+    const { totalDue } = calculateLedger(c.id, "customer", transactions, suppliers, products, 0);
+    const saved = Number(c.balance !== undefined ? c.balance : (c.due !== undefined ? c.due : 0));
+    const diff = totalDue - saved;
+    if (Math.abs(diff) > 0.05) {
+      drifts.push({
+        id: c.id,
+        name: c.name || "Unknown Customer",
+        type: "customer",
+        calculatedBalance: totalDue,
+        savedBalance: saved,
+        drift: diff
+      });
+      totalDriftAmount += Math.abs(diff);
+    }
+  });
+
+  // 2. Check Suppliers
+  (suppliers || []).forEach(s => {
+    const { totalDue } = calculateLedger(s.id, "supplier", transactions, suppliers, products, 0);
+    const saved = Number(s.balance !== undefined ? s.balance : (s.due !== undefined ? s.due : 0));
+    const diff = totalDue - saved;
+    if (Math.abs(diff) > 0.05) {
+      drifts.push({
+        id: s.id,
+        name: s.name || s.company || "Unknown Supplier",
+        type: "supplier",
+        calculatedBalance: totalDue,
+        savedBalance: saved,
+        drift: diff
+      });
+      totalDriftAmount += Math.abs(diff);
+    }
+  });
+
+  // 3. Check Staff
+  (staff || []).forEach(st => {
+    const { totalDue } = calculateLedger(st.id, "staff", transactions, suppliers, products, 0);
+    const saved = Number(st.balance !== undefined ? st.balance : (st.due !== undefined ? st.due : 0));
+    const diff = totalDue - saved;
+    if (Math.abs(diff) > 0.05) {
+      drifts.push({
+        id: st.id,
+        name: st.name || "Unknown Staff",
+        type: "staff",
+        calculatedBalance: totalDue,
+        savedBalance: saved,
+        drift: diff
+      });
+      totalDriftAmount += Math.abs(diff);
+    }
+  });
+
+  return {
+    drifts,
+    totalDriftAmount: Math.round(totalDriftAmount * 100) / 100,
+    hasDrift: drifts.length > 0
+  };
+}
+

@@ -1,31 +1,253 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Check if the user is authenticated
+    // 1. Global Safety Net: default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
     function isSignedIn() {
       return request.auth != null;
     }
 
-    // Allow read/write for system/user metadata to facilitate bootstrapping and smooth login transitions
-    match /users/{userId} {
-      allow read, write: if true;
-    }
-    match /admins/{adminId} {
-      allow read, write: if true;
-    }
-    match /companies/{companyId} {
-      allow read, write: if true;
-    }
-    match /licenses/{licenseId} {
-      allow read, write: if true;
-    }
-    match /subscriptions/{subId} {
-      allow read, write: if true;
+    function isEmailVerified() {
+      return request.auth.token.email_verified == true;
     }
 
-    // Allow any authenticated user to read and write any other document (products, sales, customers, etc.)
-    match /{document=**} {
-      allow read, write: if isSignedIn();
+    function isSuperAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'samiratraders1@gmail.com' ||
+        request.auth.token.email == 'samiratraders.barguna@gmail.com'
+      );
+    }
+
+    function hasUserData() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function getUserCompanyId() {
+      return hasUserData() ? getUserData().companyId : (isSuperAdmin() ? 'samira-traders' : '');
+    }
+
+    function getUserRole() {
+      return hasUserData() ? getUserData().role : (isSuperAdmin() ? 'admin' : 'view-only');
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        isSuperAdmin() ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        getUserRole() == 'admin'
+      );
+    }
+
+    // 2. Rules for users
+    match /users/{userId} {
+      allow read: if isSignedIn() && (
+        request.auth.uid == userId || 
+        resource.data.email == request.auth.token.email ||
+        resource.data.companyId == getUserCompanyId() || 
+        isAdmin()
+      );
+      allow write: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+    }
+
+    // Rules for admins
+    match /admins/{adminId} {
+      allow read: if isSignedIn() && (request.auth.uid == adminId || isAdmin());
+      allow write: if isAdmin() || (isSignedIn() && request.auth.uid == adminId && (request.auth.token.email == 'samiratraders1@gmail.com' || request.auth.token.email == 'samiratraders.barguna@gmail.com'));
+    }
+
+    // Rules for companies, licenses, subscriptions, roles, permissions
+    match /companies/{companyId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() || (isSignedIn() && !exists(/databases/$(database)/documents/companies/$(companyId)) && (request.auth.token.email == 'samiratraders1@gmail.com' || request.auth.token.email == 'samiratraders.barguna@gmail.com'));
+    }
+
+    match /licenses/{licenseId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() || (isSignedIn() && !exists(/databases/$(database)/documents/licenses/$(licenseId)) && (request.auth.token.email == 'samiratraders1@gmail.com' || request.auth.token.email == 'samiratraders.barguna@gmail.com'));
+    }
+
+    match /subscriptions/{subId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() || (isSignedIn() && !exists(/databases/$(database)/documents/subscriptions/$(subId)) && (request.auth.token.email == 'samiratraders1@gmail.com' || request.auth.token.email == 'samiratraders.barguna@gmail.com'));
+    }
+
+    match /roles/{roleId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /permissions/{permissionId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Helper for company-specific resources
+    function belongsToCompany(companyIdField) {
+      return isSignedIn() && (companyIdField == getUserCompanyId() || isAdmin());
+    }
+
+    // 3. Rules for company-specific collections
+    match /products/{id} {
+      allow read, update, delete: if isSignedIn() && belongsToCompany(resource.data.companyId);
+      allow create: if isSignedIn() && belongsToCompany(request.resource.data.companyId);
+    }
+
+    match /routes/{id} {
+      allow read, update, delete: if isSignedIn() && belongsToCompany(resource.data.companyId);
+      allow create: if isSignedIn() && belongsToCompany(request.resource.data.companyId);
+    }
+
+    match /staff/{id} {
+      allow read, update, delete: if isSignedIn() && belongsToCompany(resource.data.companyId);
+      allow create: if isSignedIn() && belongsToCompany(request.resource.data.companyId);
+    }
+
+    match /summaries/{id} {
+      allow read, update, delete: if isSignedIn() && belongsToCompany(resource.data.companyId);
+      allow create: if isSignedIn() && belongsToCompany(request.resource.data.companyId);
+    }
+
+    match /customers/{id} {
+      allow read, update, delete: if isSignedIn() && belongsToCompany(resource.data.companyId);
+      allow create: if isSignedIn() && belongsToCompany(request.resource.data.companyId);
+    }
+
+    match /suppliers/{id} {
+      allow read, update, delete: if isSignedIn() && belongsToCompany(resource.data.companyId);
+      allow create: if isSignedIn() && belongsToCompany(request.resource.data.companyId);
+    }
+
+    match /orders/{id} {
+      allow read, update, delete: if isSignedIn() && belongsToCompany(resource.data.companyId);
+      allow create: if isSignedIn() && belongsToCompany(request.resource.data.companyId);
+    }
+
+    match /customerGroups/{id} {
+      allow read, update, delete: if isSignedIn() && belongsToCompany(resource.data.companyId);
+      allow create: if isSignedIn() && belongsToCompany(request.resource.data.companyId);
+    }
+
+    match /sales/{id} {
+      allow read, update, delete: if isSignedIn() && belongsToCompany(resource.data.companyId);
+      allow create: if isSignedIn() && belongsToCompany(request.resource.data.companyId);
+    }
+
+    match /payments/{id} {
+      allow read, update, delete: if isSignedIn() && belongsToCompany(resource.data.companyId);
+      allow create: if isSignedIn() && belongsToCompany(request.resource.data.companyId);
+    }
+
+    match /activity_logs/{id} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isSignedIn();
+    }
+
+    match /expenses/{id} {
+      allow read, update, delete: if isSignedIn() && belongsToCompany(resource.data.companyId);
+      allow create: if isSignedIn() && belongsToCompany(request.resource.data.companyId);
+    }
+
+    match /subDbs/{id} {
+      allow read, update, delete: if isSignedIn() && belongsToCompany(resource.data.companyId);
+      allow create: if isSignedIn() && belongsToCompany(request.resource.data.companyId);
+    }
+
+    match /subDbShipments/{id} {
+      allow read, update, delete: if isSignedIn() && belongsToCompany(resource.data.companyId);
+      allow create: if isSignedIn() && belongsToCompany(request.resource.data.companyId);
+    }
+
+    match /accounts/{id} {
+      allow read, update, delete: if isSignedIn() && belongsToCompany(resource.data.companyId);
+      allow create: if isSignedIn() && belongsToCompany(request.resource.data.companyId);
+    }
+
+    match /damageInventory/{id} {
+      allow read, update, delete: if isSignedIn() && belongsToCompany(resource.data.companyId);
+      allow create: if isSignedIn() && belongsToCompany(request.resource.data.companyId);
+    }
+
+    match /supplierClaims/{id} {
+      allow read, update, delete: if isSignedIn() && belongsToCompany(resource.data.companyId);
+      allow create: if isSignedIn() && belongsToCompany(request.resource.data.companyId);
+    }
+
+    match /stockAdjustments/{id} {
+      allow read, update, delete: if isSignedIn() && belongsToCompany(resource.data.companyId);
+      allow create: if isSignedIn() && belongsToCompany(request.resource.data.companyId);
+    }
+
+    match /categories/{id} {
+      allow read, update, delete: if isSignedIn() && belongsToCompany(resource.data.companyId);
+      allow create: if isSignedIn() && belongsToCompany(request.resource.data.companyId);
+    }
+
+    match /incomeCategories/{id} {
+      allow read, update, delete: if isSignedIn() && belongsToCompany(resource.data.companyId);
+      allow create: if isSignedIn() && belongsToCompany(request.resource.data.companyId);
+    }
+
+    match /purchases/{id} {
+      allow read, update, delete: if isSignedIn() && belongsToCompany(resource.data.companyId);
+      allow create: if isSignedIn() && belongsToCompany(request.resource.data.companyId);
+    }
+
+    match /transfers/{id} {
+      allow read, update, delete: if isSignedIn() && belongsToCompany(resource.data.companyId);
+      allow create: if isSignedIn() && belongsToCompany(request.resource.data.companyId);
+    }
+
+    match /subDbSettings/{id} {
+      allow read, update, delete: if isSignedIn() && belongsToCompany(resource.data.companyId);
+      allow create: if isSignedIn() && belongsToCompany(request.resource.data.companyId);
+    }
+
+    match /boms/{id} {
+      allow read, update, delete: if isSignedIn() && belongsToCompany(resource.data.companyId);
+      allow create: if isSignedIn() && belongsToCompany(request.resource.data.companyId);
+    }
+
+    match /productions/{id} {
+      allow read, update, delete: if isSignedIn() && belongsToCompany(resource.data.companyId);
+      allow create: if isSignedIn() && belongsToCompany(request.resource.data.companyId);
+    }
+
+    match /attendance/{id} {
+      allow read, update, delete: if isSignedIn() && belongsToCompany(resource.data.companyId);
+      allow create: if isSignedIn() && belongsToCompany(request.resource.data.companyId);
+    }
+
+    match /payroll/{id} {
+      allow read, update, delete: if isSignedIn() && belongsToCompany(resource.data.companyId);
+      allow create: if isSignedIn() && belongsToCompany(request.resource.data.companyId);
+    }
+
+    match /fixedAssets/{id} {
+      allow read, update, delete: if isSignedIn() && belongsToCompany(resource.data.companyId);
+      allow create: if isSignedIn() && belongsToCompany(request.resource.data.companyId);
+    }
+
+    match /loans/{id} {
+      allow read, update, delete: if isSignedIn() && belongsToCompany(resource.data.companyId);
+      allow create: if isSignedIn() && belongsToCompany(request.resource.data.companyId);
+    }
+
+    match /returns/{id} {
+      allow read, update, delete: if isSignedIn() && belongsToCompany(resource.data.companyId);
+      allow create: if isSignedIn() && belongsToCompany(request.resource.data.companyId);
+    }
+
+    match /transactions/{id} {
+      allow read, update, delete: if isSignedIn() && belongsToCompany(resource.data.companyId);
+      allow create: if isSignedIn() && belongsToCompany(request.resource.data.companyId);
     }
   }
 }

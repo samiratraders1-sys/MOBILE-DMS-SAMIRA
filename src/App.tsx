@@ -8,11 +8,11 @@ import { onAuthStateChanged, signOut, User } from "firebase/auth";
 import { auth, db } from "./lib/firebase";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { toast, Toaster } from "react-hot-toast";
-import { Menu, X, LayoutDashboard, Package, FileText, ShoppingCart, Users, Truck, LogIn, Wifi, WifiOff, Smartphone, Plus, Trash2, Loader2, Sparkles, DollarSign, Wallet, ShoppingBag, Keyboard } from "lucide-react";
+import { Menu, X, LayoutDashboard, Package, FileText, ShoppingCart, Users, Truck, LogIn, Wifi, WifiOff, Smartphone, Plus, Trash2, Loader2, Sparkles, DollarSign, Wallet, ShoppingBag, Keyboard, ShieldCheck } from "lucide-react";
 import { snapshotAll } from "./lib/snapshot";
 import { useLanguage } from "./context/LanguageContext";
 import { performAppStorageCleanup, APP_VERSION } from "./lib/cleanup";
-import { calculateLedger } from "./utils/ledgerCalculator";
+import { calculateLedger, checkTransactionDrift } from "./utils/ledgerCalculator";
 
 
 import Sidebar from "./components/Sidebar";
@@ -56,6 +56,7 @@ import SuperAdminView from "./components/SuperAdminView";
 import ExpenseLedgerView from "./components/ExpenseLedgerView";
 import SupplierClaimsView from "./components/SupplierClaimsView";
 import CustomerCollectionModule from "./components/CustomerCollectionModule";
+import AuditComplianceView from "./components/AuditComplianceView";
 
 import { useCollection } from "./hooks/useCollection";
 import { RolePermissions } from "./lib/permissions";
@@ -365,6 +366,22 @@ export default function App() {
       };
     });
   }, [suppliers.data, suppliers.loading, transactions.data, transactions.loading, products.data]);
+
+  const auditHealth = useMemo(() => {
+    if (customers.loading || suppliers.loading || staff.loading || transactions.loading) {
+      return { totalDriftAmount: 0, hasDrift: false, loading: true };
+    }
+    return {
+      ...checkTransactionDrift(
+        customers.data || [],
+        suppliers.data || [],
+        staff.data || [],
+        transactions.data || [],
+        products.data || []
+      ),
+      loading: false
+    };
+  }, [customers.data, customers.loading, suppliers.data, suppliers.loading, staff.data, staff.loading, transactions.data, transactions.loading, products.data]);
 
   // Wrapped transaction helper methods to ensure real-time consistency
   const addPaymentWithTx = async (payRecord: any) => {
@@ -789,7 +806,7 @@ export default function App() {
   };
 
   const onClearLogs = async () => {
-    if (user?.email !== "samiratraders1@gmail.com") return;
+    if (user?.email !== "samiratraders1@gmail.com" && user?.email !== "samiratraders.barguna@gmail.com") return;
     try {
       const dbLogs = activityLogs.data;
       for (const log of dbLogs) {
@@ -947,7 +964,7 @@ export default function App() {
   console.log("DEBUG App.tsx users.data:", users.data);
   console.log("DEBUG App.tsx currentUser:", user);
   console.log("DEBUG App.tsx currentUserRecord:", currentUserRecord);
-  const role = user?.email === 'samiratraders1@gmail.com' ? 'admin' : (currentUserRecord?.role || 'view-only'); // default to view-only
+  const role = (user?.email === 'samiratraders1@gmail.com' || user?.email === 'samiratraders.barguna@gmail.com') ? 'admin' : (currentUserRecord?.role || 'view-only'); // default to view-only
   console.log("DEBUG App.tsx role:", role);
 
   function AccessDeniedView() {
@@ -997,6 +1014,14 @@ export default function App() {
             setActiveView={setActiveView} 
             role={role}
             allowedViews={role === 'admin' ? (RolePermissions as any).admin.allowedViews : (roleData?.allowedViews || (RolePermissions as any)[role]?.allowedViews || [])}
+            staff={staff.data}
+            accounts={accounts.data}
+            damageInventory={damageInventory.data}
+            supplierClaims={supplierClaims.data}
+            stockAdjustments={stockAdjustments.data}
+            updateCustomer={customers.update}
+            updateSupplier={suppliers.update}
+            updateStaff={staff.update}
           />
         );
       case "advanced-ops":
@@ -1029,7 +1054,7 @@ export default function App() {
           />
         );
       case "companies":
-        if (user?.email !== 'samiratraders1@gmail.com') return <AccessDeniedView />;
+        if (user?.email !== 'samiratraders1@gmail.com' && user?.email !== 'samiratraders.barguna@gmail.com') return <AccessDeniedView />;
         return <SuperAdminView />;
       case "delivery-route":
         return (
@@ -1151,6 +1176,8 @@ export default function App() {
               currentUserRecord={currentUserRecord}
               role={role}
               updateSummary={summaries.update}
+              transactions={transactions.data}
+              suppliers={suppliers.data}
             />
         );
       case "admin-approvals":
@@ -1508,6 +1535,25 @@ export default function App() {
             userEmail={user?.email || ""}
           />
         );
+      case "audit-compliance":
+        if (role !== 'admin') return <AccessDeniedView />;
+        return (
+          <AuditComplianceView
+            customers={customers.data}
+            suppliers={suppliers.data}
+            staff={staff.data}
+            transactions={transactions.data}
+            products={products.data}
+            activityLogs={activityLogs.data}
+            logAdminActivity={logAdminActivity}
+            setActiveView={setActiveView}
+            setSelectedLedgerParty={setSelectedLedgerParty}
+            updateCustomer={customers.update}
+            updateSupplier={suppliers.update}
+            updateStaff={staff.update}
+            addTransaction={transactions.add}
+          />
+        );
       case "activity-log":
         if (role !== 'admin') return <AccessDeniedView />;
         return (
@@ -1537,6 +1583,14 @@ export default function App() {
             setActiveView={setActiveView} 
             role={role}
             allowedViews={role === 'admin' ? (RolePermissions as any).admin.allowedViews : (roleData?.allowedViews || (RolePermissions as any)[role]?.allowedViews || [])}
+            staff={staff.data}
+            accounts={accounts.data}
+            damageInventory={damageInventory.data}
+            supplierClaims={supplierClaims.data}
+            stockAdjustments={stockAdjustments.data}
+            updateCustomer={customers.update}
+            updateSupplier={suppliers.update}
+            updateStaff={staff.update}
           />
         );
     }
@@ -1658,6 +1712,35 @@ export default function App() {
                  <span className="text-xs font-black text-indigo-700">{t("ডেমো মোড সক্রিয়")}</span>
                </div>
             )}
+
+            {/* Global Audit & Reconciliation Health Indicator */}
+            <button
+              onClick={() => setActiveView("audit-compliance")}
+              className={`flex items-center gap-2 border px-3.5 py-2 rounded-xl transition-all cursor-pointer select-none active:scale-95 shrink-0 ${
+                auditHealth.loading
+                  ? "bg-gray-50 border-gray-150 text-gray-500"
+                  : auditHealth.hasDrift
+                  ? "bg-rose-50 hover:bg-rose-100 border-rose-200 text-rose-700 font-bold"
+                  : "bg-emerald-50 hover:bg-emerald-100 border-emerald-100 text-emerald-700 font-bold"
+              }`}
+              title={auditHealth.loading ? "অডিট ডাটা লোড হচ্ছে..." : auditHealth.hasDrift ? `অডিট সতর্কতা: ${auditHealth.totalDriftAmount} ৳ অমিল সনাক্ত হয়েছে!` : "হিসাব ১০০% সঠিক আছে"}
+            >
+              <span className={`w-2 h-2 rounded-full shrink-0 ${
+                auditHealth.loading
+                  ? "bg-gray-400"
+                  : auditHealth.hasDrift
+                  ? "bg-rose-600 animate-pulse"
+                  : "bg-emerald-500"
+              }`} />
+              <ShieldCheck className="w-4 h-4 shrink-0" />
+              <span className="text-xs hidden md:inline">
+                {auditHealth.loading 
+                  ? "অডিট হচ্ছে..." 
+                  : auditHealth.hasDrift 
+                  ? `অমিল: ৳ ${auditHealth.totalDriftAmount.toLocaleString()}` 
+                  : "১০০% ব্যালেন্সড"}
+              </span>
+            </button>
 
             {isOnline ? (
                <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-100 px-3.5 py-2 rounded-xl">

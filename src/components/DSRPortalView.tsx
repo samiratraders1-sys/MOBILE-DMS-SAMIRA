@@ -1,11 +1,12 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { 
   Package, Search, Save, CheckCircle2, TrendingDown, 
-  Gift, Wallet, Users, Plus, Trash2, ShieldCheck, Info, AlertTriangle, Truck 
+  Gift, Wallet, Users, Plus, Trash2, ShieldCheck, Info, AlertTriangle, Truck, X, BarChart3, FileText, Activity
 } from "lucide-react";
 import DSRPortalMap from "./DSRPortalMap";
 import { formatCurrency, piecesToCartoon, getGroupColors } from "../lib/utils";
 import toast from "react-hot-toast";
+import { calculateLedger } from "../utils/ledgerCalculator";
 
 const EXPENSE_HEADS = [
   { id: "carriage", name: "পরিবহন খরচ / ক্যারেজ (Carriage)" },
@@ -31,6 +32,8 @@ interface DSRPortalProps {
   currentUserRecord: any;
   role: string;
   updateSummary: (id: string, item: any) => Promise<void>;
+  transactions?: any[];
+  suppliers?: any[];
 }
 
 export default function DSRPortalView({
@@ -42,12 +45,29 @@ export default function DSRPortalView({
   orders,
   currentUserRecord,
   role,
-  updateSummary
+  updateSummary,
+  transactions = [],
+  suppliers = []
 }: DSRPortalProps) {
   // Determine who the DSR is
   // If admin/manager, they can select a DSR to simulate their workspace
   const isDSRUser = role === "dsr" || (currentUserRecord && currentUserRecord.role === "dsr");
   const [selectedDSRId, setSelectedDSRId] = useState<string>("");
+  const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
+
+  // System ledger balance for this selected DSR
+  const systemLedgerBalance = useMemo(() => {
+    if (!selectedDSRId) return 0;
+    const ledger = calculateLedger(
+      selectedDSRId,
+      "staff",
+      transactions,
+      suppliers,
+      products,
+      0
+    );
+    return ledger.totalDue;
+  }, [selectedDSRId, transactions, suppliers, products]);
 
   useEffect(() => {
     if (isDSRUser && currentUserRecord?.staffId) {
@@ -317,13 +337,26 @@ export default function DSRPortalView({
     <div className="space-y-6">
       {/* Header Banner */}
       <div className="bg-gradient-to-r from-teal-700 to-emerald-950 p-6 md:p-8 rounded-3xl text-white shadow-xl">
-        <h2 className="text-2xl md:text-3xl font-black mb-2 flex items-center gap-2.5">
-          <ShieldCheck className="w-8 h-8 text-teal-300" />
-          ডিএসআর ডেলিভারি ও হিসাব পোর্টাল
-        </h2>
-        <p className="text-teal-100 text-xs md:text-sm max-w-2xl leading-relaxed">
-          আপনার আজকের ডেলিভারির প্রোডাক্টগুলোর রিটার্ন, ড্যামেজ, ফ্রি আইটেম, ডিসকাউন্ট, বিভিন্ন খরচ ও বাকি কাস্টমার কালেকশন এন্ট্রি দিন এবং সরাসরি এডমিন প্যানেলে অনুমোদনের জন্য পাঠান।
-        </p>
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <h2 className="text-2xl md:text-3xl font-black mb-2 flex items-center gap-2.5">
+              <ShieldCheck className="w-8 h-8 text-teal-300" />
+              ডিএসআর ডেলিভারি ও হিসাব পোর্টাল
+            </h2>
+            <p className="text-teal-100 text-xs md:text-sm max-w-2xl leading-relaxed">
+              আপনার আজকের ডেলিভারির প্রোডাক্টগুলোর রিটার্ন, ড্যামেজ, ফ্রি আইটেম, ডিসকাউন্ট, বিভিন্ন খরচ ও বাকি কাস্টমার কালেকশন এন্ট্রি দিন এবং সরাসরি এডমিন প্যানেলে অনুমোদনের জন্য পাঠান।
+            </p>
+          </div>
+          <div className="shrink-0">
+            <button
+              onClick={() => setIsAuditModalOpen(true)}
+              className="flex items-center gap-2 px-4.5 py-2.5 bg-emerald-500 hover:bg-emerald-600 border border-emerald-400 text-white text-xs font-black rounded-xl shadow-md transition-all active:scale-95 cursor-pointer"
+            >
+              <Activity className="w-4 h-4 text-emerald-150 animate-pulse" />
+              কুইক অডিট (Quick Audit)
+            </button>
+          </div>
+        </div>
 
         {/* If Admin/Manager simulated view */}
         {!isDSRUser && (
@@ -915,6 +948,106 @@ export default function DSRPortalView({
             </div>
           </div>
 
+        </div>
+      )}
+
+      {/* Quick Audit Modal */}
+      {isAuditModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 animate-fade-in" id="quick-audit-modal">
+          <div className="bg-white dark:bg-slate-900 border border-gray-150 dark:border-slate-800 rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl animate-scale-up">
+            {/* Modal Header */}
+            <div className="p-5 border-b border-gray-100 dark:border-slate-800 flex justify-between items-center bg-slate-50 dark:bg-slate-950/20">
+              <div className="flex items-center gap-2 text-emerald-800 dark:text-emerald-400">
+                <ShieldCheck className="w-6 h-6" />
+                <h3 className="font-extrabold text-base text-gray-900 dark:text-white">ব্যালেন্স কুইক অডিট রিপোর্ট</h3>
+              </div>
+              <button
+                onClick={() => setIsAuditModalOpen(false)}
+                className="p-1.5 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-lg text-gray-400 hover:text-gray-600 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 space-y-5">
+              <div className="bg-slate-50 dark:bg-slate-950/30 p-4 rounded-2xl border border-gray-100 dark:border-slate-800 space-y-1">
+                <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">নির্বাচিত ডিএসআর</p>
+                <p className="text-base font-black text-gray-800 dark:text-white">{currentDSRName}</p>
+                <p className="text-[11px] text-gray-400">নির্ধারিত রুট: {activeRouteName}</p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                {/* Manual Summary Balance */}
+                <div className="bg-white dark:bg-slate-950 border border-gray-200 dark:border-slate-800 p-4 rounded-2xl shadow-xs">
+                  <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider flex items-center gap-1">
+                    <FileText className="w-3 h-3 text-sky-500" />
+                    ম্যানুয়াল সামারি ব্যালেন্স
+                  </p>
+                  <p className="text-lg font-black text-gray-950 dark:text-white mt-1.5 font-mono">
+                    {formatCurrency(calculations?.balance || 0)}
+                  </p>
+                  <p className="text-[9px] text-gray-400 mt-1">আজকের এন্ট্রিকৃত খসড়া বা অনুমোদনের হিসাব</p>
+                </div>
+
+                {/* System Calculated Ledger */}
+                <div className="bg-white dark:bg-slate-950 border border-gray-200 dark:border-slate-800 p-4 rounded-2xl shadow-xs">
+                  <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider flex items-center gap-1">
+                    <BarChart3 className="w-3 h-3 text-emerald-500" />
+                    সিস্টেম লেজার ব্যালেন্স
+                  </p>
+                  <p className="text-lg font-black text-gray-950 dark:text-white mt-1.5 font-mono">
+                    {formatCurrency(systemLedgerBalance)}
+                  </p>
+                  <p className="text-[9px] text-gray-400 mt-1">স্বয়ংক্রিয় খতিয়ান হতে প্রাপ্ত নিখুঁত ব্যালেন্স</p>
+                </div>
+              </div>
+
+              {/* Difference Comparison Alert Block */}
+              {(() => {
+                const diff = (calculations?.balance || 0) - systemLedgerBalance;
+                const isPerfect = Math.abs(diff) < 0.1;
+                return (
+                  <div className={`p-4 rounded-2xl border flex items-start gap-3 ${
+                    isPerfect 
+                      ? "bg-emerald-50/70 border-emerald-100 text-emerald-900" 
+                      : "bg-rose-50/70 border-rose-100 text-rose-900"
+                  }`}>
+                    {isPerfect ? (
+                      <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                    ) : (
+                      <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                    )}
+                    <div className="space-y-1">
+                      <p className="font-extrabold text-sm">
+                        {isPerfect ? "১০০% নিখুঁত সামঞ্জস্য!" : "ব্যালেন্স অমিল (Drift) পাওয়া গেছে!"}
+                      </p>
+                      <p className="text-xs leading-normal font-medium">
+                        {isPerfect 
+                          ? "ম্যানুয়াল হিসাব সামারি ও সিস্টেম অটোমেটেড লেজার সম্পূর্ণরূপে মিলে গিয়েছে। কোনো অমিল বা ডাটা গ্যাপ নেই।" 
+                          : `ম্যানুয়াল এন্ট্রি ব্যালেন্স এবং লেজার স্টেটমেন্ট ব্যালেন্সের মধ্যে ${formatCurrency(Math.abs(diff))} এর পার্থক্য পাওয়া গেছে।`}
+                      </p>
+                      {!isPerfect && (
+                        <div className="mt-2 text-xs font-bold text-rose-850 bg-rose-100/50 px-2.5 py-1 rounded-lg w-fit">
+                          আর্থিক ব্যবধান: ৳ {diff.toLocaleString()}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 bg-slate-50 dark:bg-slate-950/20 border-t border-gray-100 dark:border-slate-800 flex justify-end gap-2">
+              <button
+                onClick={() => setIsAuditModalOpen(false)}
+                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 dark:bg-slate-850 dark:hover:bg-slate-800 text-gray-700 dark:text-gray-300 font-bold rounded-xl text-xs transition-all active:scale-95 cursor-pointer"
+              >
+                বন্ধ করুন
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

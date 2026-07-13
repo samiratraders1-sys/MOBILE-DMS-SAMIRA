@@ -13,7 +13,7 @@ export default defineConfig(({mode}) => {
         VitePWA({
             registerType: 'autoUpdate',
             workbox: {
-                maximumFileSizeToCacheInBytes: 5 * 1024 * 1024 // Set to 5MB
+                maximumFileSizeToCacheInBytes: 10 * 1024 * 1024 // Set to 10MB to handle large bundle sizes
             },
             manifest: {
                 name: 'Samira Traders DMS',

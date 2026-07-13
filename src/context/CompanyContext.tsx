@@ -138,7 +138,7 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
 
       // Automatically bootstrap Samira Traders for the admin email
-      if (user.email === 'samiratraders1@gmail.com') {
+      if (user.email === 'samiratraders1@gmail.com' || user.email === 'samiratraders.barguna@gmail.com') {
         try {
           // Ensure Company exists
           await setDoc(doc(db, 'companies', 'samira-traders'), {
@@ -169,16 +169,17 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
             status: "active"
           }, { merge: true });
 
-          // Ensure User document exists under UID
-          if (!userDocData) {
+          // Ensure User document exists under UID and has correct admin attributes
+          if (!userDocData || userDocData.companyId !== 'samira-traders' || userDocData.role !== 'admin') {
             userDocData = {
+              ...userDocData,
               uid: user.uid,
-              name: user.displayName || 'Samira Admin',
+              name: userDocData?.name || user.displayName || 'Samira Admin',
               email: user.email?.trim().toLowerCase(),
               role: 'admin',
               roleId: 'admin',
               companyId: 'samira-traders',
-              createdAt: new Date().toISOString()
+              createdAt: userDocData?.createdAt || new Date().toISOString()
             };
             await setDoc(doc(db, 'users', user.uid), userDocData);
           }

@@ -112,7 +112,7 @@ export default function Sidebar({ active, setActive, user, role, roles, onLogout
         { id: "order-mgmt", label: "অর্ডার ম্যানেজমেন্ট", icon: ClipboardList },
       ]
     },
-    ...(user?.email === 'samiratraders1@gmail.com' ? [{
+    ...(user?.email === 'samiratraders1@gmail.com' || user?.email === 'samiratraders.barguna@gmail.com' ? [{
         title: "সিস্টেম ম্যানেজমেন্ট (Super Admin)",
         items: [
           { id: "companies", label: "কোম্পানি সমূহ", icon: Building2 },
@@ -132,6 +132,7 @@ export default function Sidebar({ active, setActive, user, role, roles, onLogout
       title: "হিসাব ও টাকা-পয়সা",
       items: [
         { id: "ledger", label: "লেজার ও স্টেটমেন্ট", icon: BarChart3 },
+        { id: "audit-compliance", label: "অডিট ও কমপ্লায়েন্স (Audit)", icon: ShieldCheck },
         { id: "customer-collection", label: "কাস্টমার বাকি কালেকশন", icon: Wallet },
         { id: "finance", label: "ফিন্যান্স ও পেমেন্ট", icon: DollarSign },
         { id: "subdb", label: "সাব-ডিবি ডিস্ট্রিবিউশন", icon: TruckIcon },

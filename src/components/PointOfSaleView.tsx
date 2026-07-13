@@ -116,7 +116,7 @@ export default function PointOfSaleView({
   // Automatically find appropriate Account ID matching logged-in user
   const defaultAccountId = useMemo(() => {
     if (!accounts || accounts.length === 0) return "";
-    const isAdminForAcc = user?.email === 'samiratraders1@gmail.com' || role === 'admin';
+    const isAdminForAcc = user?.email === 'samiratraders1@gmail.com' || user?.email === 'samiratraders.barguna@gmail.com' || role === 'admin';
     if (isAdminForAcc) {
       const adminAcc = accounts.find(a => a.name.includes("অ্যাডমিন") || a.name.toLowerCase().includes("admin"));
       if (adminAcc) return adminAcc.id;

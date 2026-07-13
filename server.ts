@@ -36,6 +36,20 @@ async function startServer() {
     res.json({ status: "ok", time: new Date().toISOString() });
   });
 
+  app.post("/api/log-error", (req, res) => {
+    console.error("=== CLIENT-SIDE RUNTIME ERROR ===");
+    console.error(JSON.stringify(req.body, null, 2));
+    console.error("=================================");
+    try {
+      const fs = require("fs");
+      const logLine = `[${new Date().toISOString()}] ${JSON.stringify(req.body, null, 2)}\n\n`;
+      fs.appendFileSync(path.join(process.cwd(), "client_errors.log"), logLine);
+    } catch (err) {
+      console.error("Failed to write client_errors.log:", err);
+    }
+    res.json({ ok: true });
+  });
+
   // Forecasting endpoint
   app.post("/api/forecast", async (req, res) => {
     try {

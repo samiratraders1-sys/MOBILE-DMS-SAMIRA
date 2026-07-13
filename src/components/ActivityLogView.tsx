@@ -184,7 +184,7 @@ export default function ActivityLogView({ logs, onClearLogs, role, userEmail, on
 
   // Admin clear handler
   const handleClearHistory = async () => {
-    if (userEmail !== "samiratraders1@gmail.com") {
+    if (userEmail !== "samiratraders1@gmail.com" && userEmail !== "samiratraders.barguna@gmail.com") {
       toast.error("শুধুমাত্র হেড এডমিনের কাছে হিস্ট্রি ডিলিট করার অনুমতি রয়েছে");
       return;
     }
@@ -256,7 +256,7 @@ export default function ActivityLogView({ logs, onClearLogs, role, userEmail, on
             >
               <Download className="w-4 h-4" /> CSV হিসেবে ব্যাকআপ
             </button>
-            {userEmail === "samiratraders1@gmail.com" && (
+            {(userEmail === "samiratraders1@gmail.com" || userEmail === "samiratraders.barguna@gmail.com") && (
               <button
                 disabled={clearing || logs.length === 0}
                 onClick={handleClearHistory}
