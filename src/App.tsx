@@ -19,6 +19,7 @@ import Sidebar from "./components/Sidebar";
 import AuthScreen from "./components/AuthScreen";
 import ActivityLogView from "./components/ActivityLogView";
 import GlobalSearchOverlay from "./components/GlobalSearchOverlay";
+import GlobalSearchHeader from "./components/GlobalSearchHeader";
 import MainMenuView from "./components/MainMenuView";
 import OrderManagementView from "./components/OrderManagementView";
 import DashboardView from "./components/DashboardView";
@@ -67,6 +68,57 @@ export default function App() {
   // Run IndexedDB and localStorage cache/schema cleanup on app mount
   useEffect(() => {
     performAppStorageCleanup();
+  }, []);
+
+  // Global Tactile Haptic Feedback and Ripple Effect
+  useEffect(() => {
+    const handleGlobalClick = (e: MouseEvent) => {
+      // 1. Subtle Physical Haptic on Mobile Devices
+      if (navigator.vibrate) {
+        try {
+          navigator.vibrate(10);
+        } catch (err) {
+          // Ignore security/unsupported errors
+        }
+      }
+
+      // 2. High-Fidelity Visual Ripple Animation
+      const target = (e.target as HTMLElement).closest("button, a, [role='button'], .cursor-pointer") as HTMLElement | null;
+      if (!target) return;
+
+      const rect = target.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
+      const ripple = document.createElement("span");
+      ripple.className = "absolute bg-indigo-500/20 dark:bg-white/20 rounded-full pointer-events-none -translate-x-1/2 -translate-y-1/2 animate-ripple";
+      
+      const size = Math.max(rect.width, rect.height) * 2;
+      ripple.style.width = `${size}px`;
+      ripple.style.height = `${size}px`;
+      ripple.style.left = `${x}px`;
+      ripple.style.top = `${y}px`;
+
+      // Set styles on parent to make it clip perfectly
+      const originalPosition = window.getComputedStyle(target).position;
+      if (originalPosition === "static" || !originalPosition) {
+        target.style.position = "relative";
+      }
+      
+      const originalOverflow = window.getComputedStyle(target).overflow;
+      if (originalOverflow !== "hidden") {
+        target.style.overflow = "hidden";
+      }
+
+      target.appendChild(ripple);
+
+      setTimeout(() => {
+        ripple.remove();
+      }, 600);
+    };
+
+    window.addEventListener("mousedown", handleGlobalClick);
+    return () => window.removeEventListener("mousedown", handleGlobalClick);
   }, []);
 
   // Periodically check for application updates and show a subtle toast
@@ -1658,6 +1710,17 @@ export default function App() {
               </button>
             </div>
           </div>
+
+          <div className="flex-1 max-w-md mx-2 md:mx-4">
+            <GlobalSearchHeader 
+              products={products.data}
+              customers={customers.data}
+              sales={sales.data}
+              setActiveView={setActiveView}
+              language={language}
+            />
+          </div>
+
           <div className="flex items-center gap-3">
             {/* Language Toggle Component */}
             <div className="flex items-center gap-0.5 bg-white border border-[#E9ECEF] p-1 rounded-xl shadow-xs shrink-0 select-none">

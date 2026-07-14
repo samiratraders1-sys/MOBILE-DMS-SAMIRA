@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Calendar, Trash2, Pencil, Plus, X } from "lucide-react";
+import { Calendar, Trash2, Pencil, Plus, X, Printer, FileText } from "lucide-react";
 import { formatCurrency } from "../lib/utils";
 import ReportWrapper from "./ReportWrapper";
 import toast from "react-hot-toast";
@@ -44,6 +44,488 @@ export default function SalesView({
   const [filterSrId, setFilterSrId] = useState("");
   const [filterSupplierId, setFilterSupplierId] = useState("");
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
+  const [selectedSalesIds, setSelectedSalesIds] = useState<string[]>([]);
+
+  // High-fidelity invoice printing routine
+  const printInvoice = (sale: any) => {
+    const selectedCustomer = customers.find(c => c.id === sale.customerId);
+    const selectedRoute = routes.find(r => r.id === sale.routeId);
+    const selectedStaff = staff.find(st => st.id === sale.srId);
+
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      toast.error("প্রিন্ট উইন্ডো ওপেন করা সম্ভব হয়নি! পপ-আপ ব্লক সক্রিয় আছে কিনা চেক করুন।");
+      return;
+    }
+
+    const htmlContent = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>বিক্রয় মেমো #${sale.id ? sale.id.slice(0, 8).toUpperCase() : 'N/A'}</title>
+  <style>
+    body {
+      font-family: 'Courier New', Courier, monospace, 'Noto Sans Bengali', sans-serif;
+      color: #000;
+      background: #fff;
+      margin: 0;
+      padding: 0;
+    }
+    @page {
+      size: A4 portrait;
+      margin: 15mm;
+    }
+    .print-container {
+      width: 100%;
+    }
+    .invoice-sheet {
+      background: #fff;
+      padding: 10px;
+      box-sizing: border-box;
+      page-break-after: always;
+    }
+    .invoice-sheet:last-child {
+      page-break-after: avoid;
+    }
+    .brand-section {
+      text-align: center;
+      margin-bottom: 20px;
+      border-bottom: 2px double #000;
+      padding-bottom: 10px;
+    }
+    .brand-section h2 {
+      font-size: 24px;
+      margin: 0 0 4px 0;
+      font-weight: 900;
+      letter-spacing: -0.5px;
+    }
+    .brand-section .subtitle {
+      font-size: 11px;
+      margin: 0 0 8px 0;
+      color: #333;
+    }
+    .brand-section .badge {
+      display: inline-block;
+      border: 1px solid #000;
+      padding: 3px 12px;
+      font-size: 11px;
+      font-weight: bold;
+      text-transform: uppercase;
+    }
+    .meta-section {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 20px;
+      font-size: 11px;
+      line-height: 1.6;
+    }
+    .meta-col {
+      width: 48%;
+    }
+    .meta-col p {
+      margin: 2px 0;
+    }
+    .items-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 11px;
+      margin-bottom: 20px;
+    }
+    .items-table th {
+      border-top: 1px solid #000;
+      border-bottom: 1px solid #000;
+      padding: 6px 4px;
+      text-align: left;
+      font-weight: bold;
+    }
+    .items-table td {
+      border-bottom: 1px dotted #999;
+      padding: 6px 4px;
+    }
+    .font-bold {
+      font-weight: bold;
+    }
+    .totals-section {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 10px;
+      margin-bottom: 30px;
+    }
+    .totals-box {
+      width: 40%;
+      font-size: 12px;
+    }
+    .total-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 4px 0;
+      border-bottom: 1px dotted #ccc;
+    }
+    .grand-total {
+      font-weight: bold;
+      font-size: 14px;
+      border-top: 1px solid #000;
+      border-bottom: 2px double #000;
+      padding: 6px 0;
+      margin-top: 4px;
+    }
+    .footer-section {
+      text-align: center;
+      font-size: 9px;
+      margin-top: 40px;
+      border-top: 1px dashed #000;
+      padding-top: 10px;
+    }
+    .footer-section p {
+      margin: 2px 0;
+    }
+    .timestamp {
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <div class="print-container">
+    <div class="invoice-sheet">
+      <div class="brand-section">
+        <h2>সমীরা ট্রেডার্স</h2>
+        <p class="subtitle">চকবাজার, ঢাকা | ডিস্ট্রিবিউশন ম্যানেজমেন্ট সিস্টেম (DMS)</p>
+        <div class="badge">ক্যাশ মেমো / ইনভয়েস</div>
+      </div>
+      
+      <div class="meta-section">
+        <div class="meta-col">
+          <p><strong>মেমো আইডি:</strong> #${sale.id ? sale.id.slice(0, 8).toUpperCase() : 'N/A'}</p>
+          <p><strong>তারিখ:</strong> ${new Date(sale.date).toLocaleDateString('bn-BD', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
+          <p><strong>কাস্টমার:</strong> ${selectedCustomer?.name || "নগদ কাস্টমার"}</p>
+        </div>
+        <div class="meta-col">
+          <p><strong>ডেলিভারি রোড:</strong> ${selectedRoute?.name || 'N/A'}</p>
+          <p><strong>এস আর:</strong> ${selectedStaff?.name || 'N/A'}</p>
+          <p><strong>ইস্যুকারী:</strong> ${sale.createdBy || 'Unknown'}</p>
+        </div>
+      </div>
+      
+      <table class="items-table">
+        <thead>
+          <tr>
+            <th style="width: 8%;">ক্রমিক</th>
+            <th>পণ্যের বিবরণ</th>
+            <th style="text-align: center; width: 25%;">পরিমাণ (Ctn/Pcs)</th>
+            <th style="text-align: right; width: 15%;">দর (Pcs)</th>
+            <th style="text-align: right; width: 18%;">মোট মূল্য</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${(sale.items || []).map((item: any, idx: number) => {
+            const prod = products.find(p => p.id === (item.productId || item.id));
+            const name = prod?.name || item.name || 'অজানা পণ্য';
+            const qty = Number(item.qty || item.quantity || 0);
+            const price = Number(item.price || 0);
+            const cartonSize = Number(prod?.cartoonSize || prod?.cartonSize || 1);
+            
+            let qtyStr = `${qty} Pcs`;
+            if (cartonSize > 1) {
+              const c = Math.floor(qty / cartonSize);
+              const p = qty % cartonSize;
+              const pts = [];
+              if (c > 0) pts.push(`${c}C`);
+              if (p > 0) pts.push(`${p}P`);
+              qtyStr = `${pts.join('/')} (${qty} Pcs)`;
+            }
+            
+            return `
+              <tr>
+                <td>${idx + 1}</td>
+                <td class="font-bold">${name}</td>
+                <td style="text-align: center; font-weight: bold;">${qtyStr}</td>
+                <td style="text-align: right;">${price.toFixed(2)} ৳</td>
+                <td style="text-align: right; font-weight: bold;">${(qty * price).toFixed(2)} ৳</td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+      
+      <div class="totals-section">
+        <div class="totals-box">
+          <div class="total-row">
+            <span>মোট বিল:</span>
+            <span>${Number(sale.total || 0).toFixed(2)} ৳</span>
+          </div>
+          <div class="total-row grand-total">
+            <span>চূড়ান্ত নিট বিল:</span>
+            <span>${Number(sale.total || 0).toFixed(2)} ৳</span>
+          </div>
+        </div>
+      </div>
+      
+      <div class="footer-section">
+        <p>ক্রয় করার জন্য ধন্যবাদ! যেকোনো অনুসন্ধানে যোগাযোগ করুন।</p>
+        <p class="timestamp">প্রিন্ট সময়: ${new Date().toLocaleString('bn-BD')}</p>
+      </div>
+    </div>
+  </div>
+  <script>
+    window.onload = function() {
+      window.print();
+      setTimeout(function() { window.close(); }, 500);
+    };
+  </script>
+</body>
+</html>
+    `;
+
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+  };
+
+  // High-fidelity bulk invoice printing routine
+  const printBulkInvoices = (salesToPrint: any[]) => {
+    if (salesToPrint.length === 0) {
+      toast.error("প্রিন্ট করার জন্য কোনো ইনভয়েস সিলেক্ট করা নেই!");
+      return;
+    }
+
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      toast.error("প্রিন্ট উইন্ডো ওপেন করা সম্ভব হয়নি! পপ-আপ ব্লক সক্রিয় আছে কিনা চেক করুন।");
+      return;
+    }
+
+    const invoicesHtml = salesToPrint.map((sale) => {
+      const selectedCustomer = customers.find(c => c.id === sale.customerId);
+      const selectedRoute = routes.find(r => r.id === sale.routeId);
+      const selectedStaff = staff.find(st => st.id === sale.srId);
+
+      return `
+        <div class="invoice-sheet">
+          <div class="brand-section">
+            <h2>সমীরা ট্রেডার্স</h2>
+            <p class="subtitle">চকবাজার, ঢাকা | ডিস্ট্রিবিউশন ম্যানেজমেন্ট সিস্টেম (DMS)</p>
+            <div class="badge">ক্যাশ মেমো / ইনভয়েস</div>
+          </div>
+          
+          <div class="meta-section">
+            <div class="meta-col">
+              <p><strong>মেমো আইডি:</strong> #${sale.id ? sale.id.slice(0, 8).toUpperCase() : 'N/A'}</p>
+              <p><strong>তারিখ:</strong> ${new Date(sale.date).toLocaleDateString('bn-BD', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
+              <p><strong>কাস্টমার:</strong> ${selectedCustomer?.name || "নগদ কাস্টমার"}</p>
+            </div>
+            <div class="meta-col">
+              <p><strong>ডেলিভারি রোড:</strong> ${selectedRoute?.name || 'N/A'}</p>
+              <p><strong>এস আর:</strong> ${selectedStaff?.name || 'N/A'}</p>
+              <p><strong>ইস্যুকারী:</strong> ${sale.createdBy || 'Unknown'}</p>
+            </div>
+          </div>
+          
+          <table class="items-table">
+            <thead>
+              <tr>
+                <th style="width: 8%;">ক্রমিক</th>
+                <th>পণ্যের বিবরণ</th>
+                <th style="text-align: center; width: 25%;">পরিমাণ (Ctn/Pcs)</th>
+                <th style="text-align: right; width: 15%;">দর (Pcs)</th>
+                <th style="text-align: right; width: 18%;">মোট মূল্য</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${(sale.items || []).map((item: any, idx: number) => {
+                const prod = products.find(p => p.id === (item.productId || item.id));
+                const name = prod?.name || item.name || 'অজানা পণ্য';
+                const qty = Number(item.qty || item.quantity || 0);
+                const price = Number(item.price || 0);
+                const cartonSize = Number(prod?.cartoonSize || prod?.cartonSize || 1);
+                
+                let qtyStr = `${qty} Pcs`;
+                if (cartonSize > 1) {
+                  const c = Math.floor(qty / cartonSize);
+                  const p = qty % cartonSize;
+                  const pts = [];
+                  if (c > 0) pts.push(`${c}C`);
+                  if (p > 0) pts.push(`${p}P`);
+                  qtyStr = `${pts.join('/')} (${qty} Pcs)`;
+                }
+                
+                return `
+                  <tr>
+                    <td>${idx + 1}</td>
+                    <td class="font-bold">${name}</td>
+                    <td style="text-align: center; font-weight: bold;">${qtyStr}</td>
+                    <td style="text-align: right;">${price.toFixed(2)} ৳</td>
+                    <td style="text-align: right; font-weight: bold;">${(qty * price).toFixed(2)} ৳</td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+          
+          <div class="totals-section">
+            <div class="totals-box">
+              <div class="total-row">
+                <span>মোট বিল:</span>
+                <span>${Number(sale.total || 0).toFixed(2)} ৳</span>
+              </div>
+              <div class="total-row grand-total">
+                <span>চূড়ান্ত নিট বিল:</span>
+                <span>${Number(sale.total || 0).toFixed(2)} ৳</span>
+              </div>
+            </div>
+          </div>
+          
+          <div class="footer-section">
+            <p>ক্রয় করার জন্য ধন্যবাদ! যেকোনো অনুসন্ধানে যোগাযোগ করুন।</p>
+            <p class="timestamp">প্রিন্ট সময়: ${new Date().toLocaleString('bn-BD')}</p>
+          </div>
+        </div>
+      `;
+    }).join("");
+
+    const htmlContent = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>বাল্ক বিক্রয় মেমো প্রিন্ট (${salesToPrint.length} টি)</title>
+  <style>
+    body {
+      font-family: 'Courier New', Courier, monospace, 'Noto Sans Bengali', sans-serif;
+      color: #000;
+      background: #fff;
+      margin: 0;
+      padding: 0;
+    }
+    @page {
+      size: A4 portrait;
+      margin: 15mm;
+    }
+    .print-container {
+      width: 100%;
+    }
+    .invoice-sheet {
+      background: #fff;
+      padding: 10px;
+      box-sizing: border-box;
+      page-break-after: always;
+    }
+    .invoice-sheet:last-child {
+      page-break-after: avoid;
+    }
+    .brand-section {
+      text-align: center;
+      margin-bottom: 20px;
+      border-bottom: 2px double #000;
+      padding-bottom: 10px;
+    }
+    .brand-section h2 {
+      font-size: 24px;
+      margin: 0 0 4px 0;
+      font-weight: 900;
+      letter-spacing: -0.5px;
+    }
+    .brand-section .subtitle {
+      font-size: 11px;
+      margin: 0 0 8px 0;
+      color: #333;
+    }
+    .brand-section .badge {
+      display: inline-block;
+      border: 1px solid #000;
+      padding: 3px 12px;
+      font-size: 11px;
+      font-weight: bold;
+      text-transform: uppercase;
+    }
+    .meta-section {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 20px;
+      font-size: 11px;
+      line-height: 1.6;
+    }
+    .meta-col {
+      width: 48%;
+    }
+    .meta-col p {
+      margin: 2px 0;
+    }
+    .items-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 11px;
+      margin-bottom: 20px;
+    }
+    .items-table th {
+      border-top: 1px solid #000;
+      border-bottom: 1px solid #000;
+      padding: 6px 4px;
+      text-align: left;
+      font-weight: bold;
+    }
+    .items-table td {
+      border-bottom: 1px dotted #999;
+      padding: 6px 4px;
+    }
+    .font-bold {
+      font-weight: bold;
+    }
+    .totals-section {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 10px;
+      margin-bottom: 30px;
+    }
+    .totals-box {
+      width: 40%;
+      font-size: 12px;
+    }
+    .total-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 4px 0;
+      border-bottom: 1px dotted #ccc;
+    }
+    .grand-total {
+      font-weight: bold;
+      font-size: 14px;
+      border-top: 1px solid #000;
+      border-bottom: 2px double #000;
+      padding: 6px 0;
+      margin-top: 4px;
+    }
+    .footer-section {
+      text-align: center;
+      font-size: 9px;
+      margin-top: 40px;
+      border-top: 1px dashed #000;
+      padding-top: 10px;
+    }
+    .footer-section p {
+      margin: 2px 0;
+    }
+    .timestamp {
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <div class="print-container">
+    ${invoicesHtml}
+  </div>
+  <script>
+    window.onload = function() {
+      window.print();
+      setTimeout(function() { window.close(); }, 500);
+    };
+  </script>
+</body>
+</html>
+    `;
+
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+  };
 
   // Edit States
   const [editingSale, setEditingSale] = useState<any | null>(null);
@@ -348,10 +830,50 @@ export default function SalesView({
           </button>
       </div>
 
+      {selectedSalesIds.length > 0 && (
+        <div className="bg-indigo-50 border border-indigo-100 p-4 rounded-xl flex flex-col sm:flex-row justify-between items-center gap-3 mb-4 animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-indigo-600 animate-pulse" />
+            <p className="text-xs font-bold text-indigo-900">
+              {selectedSalesIds.length} টি ইনভয়েস সিলেক্ট করা হয়েছে
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => printBulkInvoices(filteredSales.filter(s => selectedSalesIds.includes(s.id)))}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs px-4 py-2 rounded-lg flex items-center gap-2 transition cursor-pointer shadow-xs active:scale-98"
+            >
+              <Printer className="w-4 h-4" />
+              <span>বাল্ক প্রিন্ট করুন ({selectedSalesIds.length})</span>
+            </button>
+            <button
+              onClick={() => setSelectedSalesIds([])}
+              className="bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs px-4 py-2 border rounded-lg transition cursor-pointer"
+            >
+              সিলেকশন মুছুন
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="bg-white border border-[#E9ECEF] rounded-xl overflow-x-auto">
         <table className="w-full text-left">
           <thead className="bg-[#F8F9FA]">
             <tr>
+              <th className="px-6 py-4 text-xs font-semibold uppercase text-gray-500 w-12 text-center">
+                <input 
+                  type="checkbox" 
+                  checked={filteredSales.length > 0 && selectedSalesIds.length === filteredSales.length}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      setSelectedSalesIds(filteredSales.map(s => s.id));
+                    } else {
+                      setSelectedSalesIds([]);
+                    }
+                  }}
+                  className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer h-4 w-4"
+                />
+              </th>
               <th className="px-6 py-4 text-xs font-semibold uppercase text-gray-500">তারিখ</th>
               <th className="px-6 py-4 text-xs font-semibold uppercase text-gray-500">রোড</th>
               <th className="px-6 py-4 text-xs font-semibold uppercase text-gray-500">এস আর</th>
@@ -363,58 +885,82 @@ export default function SalesView({
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {filteredSales.map(s => (
-              <React.Fragment key={s.id}>
-                <tr className="hover:bg-gray-50">
-                    <td onClick={() => setExpandedRowId(expandedRowId === s.id ? null : s.id)} className="px-6 py-4 cursor-pointer">{new Date(s.date).toLocaleDateString('bn-BD')}</td>
-                    <td onClick={() => setExpandedRowId(expandedRowId === s.id ? null : s.id)} className="px-6 py-4 cursor-pointer">{routes.find(r => r.id === s.routeId)?.name || 'N/A'}</td>
-                    <td onClick={() => setExpandedRowId(expandedRowId === s.id ? null : s.id)} className="px-6 py-4 cursor-pointer">{staff.find(st => st.id === s.srId)?.name || 'N/A'}</td>
-                    <td onClick={() => setExpandedRowId(expandedRowId === s.id ? null : s.id)} className="px-6 py-4 cursor-pointer">{customers.find(c => c.id === s.customerId)?.name || "নগদ কাস্টমার"}</td>
-                    <td onClick={() => setExpandedRowId(expandedRowId === s.id ? null : s.id)} className="px-6 py-4 text-sm text-gray-600 cursor-pointer">
-                        {s.items?.length || 0} আইটেম
-                    </td>
-                    <td onClick={() => setExpandedRowId(expandedRowId === s.id ? null : s.id)} className="px-6 py-4 font-bold cursor-pointer">{formatCurrency(s.total)}</td>
-                    <td onClick={() => setExpandedRowId(expandedRowId === s.id ? null : s.id)} className="px-6 py-4 cursor-pointer">{s.createdBy || 'Unknown'}</td>
-                    <td className="px-6 py-4 text-center">
-                      <div className="flex justify-center gap-1.5" onClick={e => e.stopPropagation()}>
-                        <button 
-                          onClick={() => handleStartEditSale(s)}
-                          className="p-1 px-1.5 text-gray-400 hover:text-indigo-650 hover:bg-indigo-50 border border-transparent hover:border-indigo-100 rounded-lg transition-all cursor-pointer"
-                          title="সম্পাদনা করুন (Edit)"
-                        >
-                          <Pencil className="w-3.5 h-3.5" />
-                        </button>
-                        <button 
-                          onClick={() => handleDeleteSale(s)}
-                          className="p-1 px-1.5 text-gray-400 hover:text-red-650 hover:bg-rose-50 border border-transparent hover:border-red-100 rounded-lg transition-all cursor-pointer"
-                          title="ডিলিট করুন"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </td>
-                </tr>
-                {expandedRowId === s.id && (
-                    <tr>
-                        <td colSpan={8} className="bg-gray-50 p-4">
-                            <h4 className="font-bold mb-2">অর্ডার ডিটেইলস:</h4>
-                            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                                {s.items?.map((item: any, idx: number) => {
-                                    const prod = products.find(p => p.id === item.productId);
-                                    return (
-                                        <div key={idx} className="bg-white p-2 rounded text-sm border shadow-sm">
-                                        <span className="font-bold">{prod?.name || item.name || 'Unknown'}</span>
-                                        <br />
-                                        {item.qty} x {formatCurrency(item.price || 0)} = {formatCurrency(item.qty * (item.price || 0))}
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        </td>
-                    </tr>
-                )}
-              </React.Fragment>
-            ))}
+            {filteredSales.map(s => {
+              const isSelected = selectedSalesIds.includes(s.id);
+              return (
+                <React.Fragment key={s.id}>
+                  <tr className={`hover:bg-gray-50 ${isSelected ? "bg-indigo-50/40" : ""}`}>
+                      <td className="px-6 py-4 text-center">
+                        <input 
+                          type="checkbox" 
+                          checked={isSelected}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedSalesIds(prev => [...prev, s.id]);
+                            } else {
+                              setSelectedSalesIds(prev => prev.filter(id => id !== s.id));
+                            }
+                          }}
+                          className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer h-4 w-4"
+                        />
+                      </td>
+                      <td onClick={() => setExpandedRowId(expandedRowId === s.id ? null : s.id)} className="px-6 py-4 cursor-pointer">{new Date(s.date).toLocaleDateString('bn-BD')}</td>
+                      <td onClick={() => setExpandedRowId(expandedRowId === s.id ? null : s.id)} className="px-6 py-4 cursor-pointer">{routes.find(r => r.id === s.routeId)?.name || 'N/A'}</td>
+                      <td onClick={() => setExpandedRowId(expandedRowId === s.id ? null : s.id)} className="px-6 py-4 cursor-pointer">{staff.find(st => st.id === s.srId)?.name || 'N/A'}</td>
+                      <td onClick={() => setExpandedRowId(expandedRowId === s.id ? null : s.id)} className="px-6 py-4 cursor-pointer">{customers.find(c => c.id === s.customerId)?.name || "নগদ কাস্টমার"}</td>
+                      <td onClick={() => setExpandedRowId(expandedRowId === s.id ? null : s.id)} className="px-6 py-4 text-sm text-gray-600 cursor-pointer">
+                          {s.items?.length || 0} আইটেম
+                      </td>
+                      <td onClick={() => setExpandedRowId(expandedRowId === s.id ? null : s.id)} className="px-6 py-4 font-bold cursor-pointer">{formatCurrency(s.total)}</td>
+                      <td onClick={() => setExpandedRowId(expandedRowId === s.id ? null : s.id)} className="px-6 py-4 cursor-pointer">{s.createdBy || 'Unknown'}</td>
+                      <td className="px-6 py-4 text-center">
+                        <div className="flex justify-center gap-1.5" onClick={e => e.stopPropagation()}>
+                          <button 
+                            onClick={() => printInvoice(s)}
+                            className="p-1 px-1.5 text-gray-400 hover:text-emerald-650 hover:bg-emerald-50 border border-transparent hover:border-emerald-100 rounded-lg transition-all cursor-pointer"
+                            title="মেমো প্রিন্ট করুন"
+                          >
+                            <Printer className="w-3.5 h-3.5" />
+                          </button>
+                          <button 
+                            onClick={() => handleStartEditSale(s)}
+                            className="p-1 px-1.5 text-gray-400 hover:text-indigo-650 hover:bg-indigo-50 border border-transparent hover:border-indigo-100 rounded-lg transition-all cursor-pointer"
+                            title="সম্পাদনা করুন (Edit)"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button 
+                            onClick={() => handleDeleteSale(s)}
+                            className="p-1 px-1.5 text-gray-400 hover:text-red-650 hover:bg-rose-50 border border-transparent hover:border-red-100 rounded-lg transition-all cursor-pointer"
+                            title="ডিলিট করুন"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                  </tr>
+                  {expandedRowId === s.id && (
+                      <tr>
+                          <td colSpan={9} className="bg-gray-50 p-4">
+                              <h4 className="font-bold mb-2">অর্ডার ডিটেইলস:</h4>
+                              <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                                  {s.items?.map((item: any, idx: number) => {
+                                      const prod = products.find(p => p.id === item.productId);
+                                      return (
+                                          <div key={idx} className="bg-white p-2 rounded text-sm border shadow-sm">
+                                          <span className="font-bold">{prod?.name || item.name || 'Unknown'}</span>
+                                          <br />
+                                          {item.qty} x {formatCurrency(item.price || 0)} = {formatCurrency(item.qty * (item.price || 0))}
+                                          </div>
+                                      );
+                                  })}
+                              </div>
+                          </td>
+                      </tr>
+                  )}
+                </React.Fragment>
+              );
+            })}
           </tbody>
         </table>
       </div>

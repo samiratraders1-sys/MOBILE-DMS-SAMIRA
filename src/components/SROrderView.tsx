@@ -162,6 +162,35 @@ export default function SROrderView({ products, customers, routes, staff, addOrd
   const [showSummaryModal, setShowSummaryModal] = useState(false);
   const submittingRef = React.useRef(false);
 
+  // Keyboard Shortcuts for SR Order View
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ctrl+S to save/open summary
+      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+        e.preventDefault();
+        if (cart && cart.length > 0) {
+          if (showSummaryModal) {
+            handleSubmit();
+            toast.success("অর্ডার শর্টকাট: অর্ডার সম্পন্ন করা হচ্ছে...", { id: "sr-shortcut-s" });
+          } else {
+            setShowSummaryModal(true);
+            toast.success("অর্ডার শর্টকাট: অর্ডার সামারি খোলা হয়েছে", { id: "sr-shortcut-summary" });
+          }
+        }
+      }
+      // Ctrl+P to print
+      if ((e.ctrlKey || e.metaKey) && e.key === "p") {
+        if (cart && cart.length > 0) {
+          e.preventDefault();
+          window.print();
+          toast.success("অর্ডার শর্টকাট: রিসিট প্রিন্ট করা হচ্ছে...", { id: "sr-shortcut-p" });
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [cart, showSummaryModal, selectedRoute, selectedSR, customDiscount]);
+
   const handleSubmit = async () => {
     if (!selectedRoute) {
       toast.error("দয়া করে একটি রুট সিলেক্ট করুন।");

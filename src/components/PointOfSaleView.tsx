@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { Plus, ShoppingBasket, Search, Trash2, Printer, CheckCircle, RotateCcw, AlertTriangle, UserCheck, Loader2 } from "lucide-react";
 import { recordStockMovement } from "../lib/inventoryEngine";
 import { MovementType } from "../lib/stockMovement";
@@ -115,6 +115,30 @@ export default function PointOfSaleView({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [receiptFormat, setReceiptFormat] = useState<"standard" | "thermal_58mm">("thermal_58mm");
   const submittingRef = React.useRef(false);
+
+  // Keyboard Shortcuts for POS
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Check if Ctrl+S or Cmd+S is pressed
+      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+        e.preventDefault();
+        if (cart && cart.length > 0 && !isCheckoutModalOpen) {
+          handleCheckout();
+          toast.success("পস শর্টকাট: বিক্রয় সাবমিট করা হচ্ছে...", { id: "pos-shortcut-s" });
+        }
+      }
+      // Check if Ctrl+P or Cmd+P is pressed
+      if ((e.ctrlKey || e.metaKey) && e.key === "p") {
+        if (isCheckoutModalOpen && activeReceipt) {
+          e.preventDefault();
+          handlePrintReceipt();
+          toast.success("পস শর্টকাট: রশিদ প্রিন্ট করা হচ্ছে...", { id: "pos-shortcut-p" });
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [cart, isCheckoutModalOpen, activeReceipt]);
 
   // Cart templates
   const [isReadySalesOpen, setIsReadySalesOpen] = useState(false);
