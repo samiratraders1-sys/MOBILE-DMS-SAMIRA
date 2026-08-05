@@ -31,6 +31,7 @@
     "express": "^4.21.2",
     "firebase": "^12.14.0",
     "flexsearch": "^0.8.212",
+    "html5-qrcode": "^2.3.8",
     "jspdf": "^4.2.1",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",

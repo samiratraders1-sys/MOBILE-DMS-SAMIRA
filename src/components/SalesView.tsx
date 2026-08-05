@@ -1,11 +1,14 @@
-import React, { useState } from "react";
-import { Calendar, Trash2, Pencil, Plus, X, Printer, FileText } from "lucide-react";
+import React, { useState, useMemo } from "react";
+import { Calendar, Trash2, Pencil, Plus, X, Printer, FileText, RefreshCw, AlertTriangle, Wifi, WifiOff, CheckCircle } from "lucide-react";
 import { formatCurrency } from "../lib/utils";
 import ReportWrapper from "./ReportWrapper";
 import toast from "react-hot-toast";
 import MultiSelect from "./MultiSelect";
 import { recordStockMovement } from "../lib/inventoryEngine";
 import { useConfirm } from "../context/ConfirmContext";
+import { useCompany } from "../context/CompanyContext";
+import { disableNetwork, enableNetwork } from "firebase/firestore";
+import { db } from "../lib/firebase";
 
 interface SalesProps {
   sales: any[];
@@ -45,255 +48,49 @@ export default function SalesView({
   const [filterSupplierId, setFilterSupplierId] = useState("");
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
   const [selectedSalesIds, setSelectedSalesIds] = useState<string[]>([]);
+  const { company } = useCompany();
 
-  // High-fidelity invoice printing routine
-  const printInvoice = (sale: any) => {
-    const selectedCustomer = customers.find(c => c.id === sale.customerId);
-    const selectedRoute = routes.find(r => r.id === sale.routeId);
-    const selectedStaff = staff.find(st => st.id === sale.srId);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const unsyncedSalesCount = useMemo(() => {
+    return (sales || []).filter((s: any) => s.pending_changes === true).length;
+  }, [sales]);
 
-    const printWindow = window.open("", "_blank");
-    if (!printWindow) {
-      toast.error("প্রিন্ট উইন্ডো ওপেন করা সম্ভব হয়নি! পপ-আপ ব্লক সক্রিয় আছে কিনা চেক করুন।");
+  const handleRetrySync = async () => {
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      toast.error("আপনি এখনও অফলাইন আছেন! ইন্টারনেট কানেকশন চেক করুন।");
       return;
     }
-
-    const htmlContent = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>বিক্রয় মেমো #${sale.id ? sale.id.slice(0, 8).toUpperCase() : 'N/A'}</title>
-  <style>
-    body {
-      font-family: 'Courier New', Courier, monospace, 'Noto Sans Bengali', sans-serif;
-      color: #000;
-      background: #fff;
-      margin: 0;
-      padding: 0;
+    setIsSyncing(true);
+    try {
+      toast.loading("ম্যানুয়াল সিঙ্ক শুরু হচ্ছে...", { id: "sync-toast" });
+      await disableNetwork(db);
+      await enableNetwork(db);
+      toast.success("ম্যানুয়াল সিঙ্ক সম্পন্ন হয়েছে এবং ডাটা সফলভাবে ক্লাউডে আপলোড করা হচ্ছে!", { id: "sync-toast" });
+    } catch (err: any) {
+      console.error("Manual sync failed:", err);
+      toast.error("সিঙ্ক করতে ব্যর্থ হয়েছে: " + err.message, { id: "sync-toast" });
+    } finally {
+      setIsSyncing(false);
     }
-    @page {
-      size: A4 portrait;
-      margin: 15mm;
-    }
-    .print-container {
-      width: 100%;
-    }
-    .invoice-sheet {
-      background: #fff;
-      padding: 10px;
-      box-sizing: border-box;
-      page-break-after: always;
-    }
-    .invoice-sheet:last-child {
-      page-break-after: avoid;
-    }
-    .brand-section {
-      text-align: center;
-      margin-bottom: 20px;
-      border-bottom: 2px double #000;
-      padding-bottom: 10px;
-    }
-    .brand-section h2 {
-      font-size: 24px;
-      margin: 0 0 4px 0;
-      font-weight: 900;
-      letter-spacing: -0.5px;
-    }
-    .brand-section .subtitle {
-      font-size: 11px;
-      margin: 0 0 8px 0;
-      color: #333;
-    }
-    .brand-section .badge {
-      display: inline-block;
-      border: 1px solid #000;
-      padding: 3px 12px;
-      font-size: 11px;
-      font-weight: bold;
-      text-transform: uppercase;
-    }
-    .meta-section {
-      display: flex;
-      justify-content: space-between;
-      margin-bottom: 20px;
-      font-size: 11px;
-      line-height: 1.6;
-    }
-    .meta-col {
-      width: 48%;
-    }
-    .meta-col p {
-      margin: 2px 0;
-    }
-    .items-table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 11px;
-      margin-bottom: 20px;
-    }
-    .items-table th {
-      border-top: 1px solid #000;
-      border-bottom: 1px solid #000;
-      padding: 6px 4px;
-      text-align: left;
-      font-weight: bold;
-    }
-    .items-table td {
-      border-bottom: 1px dotted #999;
-      padding: 6px 4px;
-    }
-    .font-bold {
-      font-weight: bold;
-    }
-    .totals-section {
-      display: flex;
-      justify-content: flex-end;
-      margin-top: 10px;
-      margin-bottom: 30px;
-    }
-    .totals-box {
-      width: 40%;
-      font-size: 12px;
-    }
-    .total-row {
-      display: flex;
-      justify-content: space-between;
-      padding: 4px 0;
-      border-bottom: 1px dotted #ccc;
-    }
-    .grand-total {
-      font-weight: bold;
-      font-size: 14px;
-      border-top: 1px solid #000;
-      border-bottom: 2px double #000;
-      padding: 6px 0;
-      margin-top: 4px;
-    }
-    .footer-section {
-      text-align: center;
-      font-size: 9px;
-      margin-top: 40px;
-      border-top: 1px dashed #000;
-      padding-top: 10px;
-    }
-    .footer-section p {
-      margin: 2px 0;
-    }
-    .timestamp {
-      color: #666;
-    }
-  </style>
-</head>
-<body>
-  <div class="print-container">
-    <div class="invoice-sheet">
-      <div class="brand-section">
-        <h2>সমীরা ট্রেডার্স</h2>
-        <p class="subtitle">চকবাজার, ঢাকা | ডিস্ট্রিবিউশন ম্যানেজমেন্ট সিস্টেম (DMS)</p>
-        <div class="badge">ক্যাশ মেমো / ইনভয়েস</div>
-      </div>
-      
-      <div class="meta-section">
-        <div class="meta-col">
-          <p><strong>মেমো আইডি:</strong> #${sale.id ? sale.id.slice(0, 8).toUpperCase() : 'N/A'}</p>
-          <p><strong>তারিখ:</strong> ${new Date(sale.date).toLocaleDateString('bn-BD', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
-          <p><strong>কাস্টমার:</strong> ${selectedCustomer?.name || "নগদ কাস্টমার"}</p>
-        </div>
-        <div class="meta-col">
-          <p><strong>ডেলিভারি রোড:</strong> ${selectedRoute?.name || 'N/A'}</p>
-          <p><strong>এস আর:</strong> ${selectedStaff?.name || 'N/A'}</p>
-          <p><strong>ইস্যুকারী:</strong> ${sale.createdBy || 'Unknown'}</p>
-        </div>
-      </div>
-      
-      <table class="items-table">
-        <thead>
-          <tr>
-            <th style="width: 8%;">ক্রমিক</th>
-            <th>পণ্যের বিবরণ</th>
-            <th style="text-align: center; width: 25%;">পরিমাণ (Ctn/Pcs)</th>
-            <th style="text-align: right; width: 15%;">দর (Pcs)</th>
-            <th style="text-align: right; width: 18%;">মোট মূল্য</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${(sale.items || []).map((item: any, idx: number) => {
-            const prod = products.find(p => p.id === (item.productId || item.id));
-            const name = prod?.name || item.name || 'অজানা পণ্য';
-            const qty = Number(item.qty || item.quantity || 0);
-            const price = Number(item.price || 0);
-            const cartonSize = Number(prod?.cartoonSize || prod?.cartonSize || 1);
-            
-            let qtyStr = `${qty} Pcs`;
-            if (cartonSize > 1) {
-              const c = Math.floor(qty / cartonSize);
-              const p = qty % cartonSize;
-              const pts = [];
-              if (c > 0) pts.push(`${c}C`);
-              if (p > 0) pts.push(`${p}P`);
-              qtyStr = `${pts.join('/')} (${qty} Pcs)`;
-            }
-            
-            return `
-              <tr>
-                <td>${idx + 1}</td>
-                <td class="font-bold">${name}</td>
-                <td style="text-align: center; font-weight: bold;">${qtyStr}</td>
-                <td style="text-align: right;">${price.toFixed(2)} ৳</td>
-                <td style="text-align: right; font-weight: bold;">${(qty * price).toFixed(2)} ৳</td>
-              </tr>
-            `;
-          }).join('')}
-        </tbody>
-      </table>
-      
-      <div class="totals-section">
-        <div class="totals-box">
-          <div class="total-row">
-            <span>মোট বিল:</span>
-            <span>${Number(sale.total || 0).toFixed(2)} ৳</span>
-          </div>
-          <div class="total-row grand-total">
-            <span>চূড়ান্ত নিট বিল:</span>
-            <span>${Number(sale.total || 0).toFixed(2)} ৳</span>
-          </div>
-        </div>
-      </div>
-      
-      <div class="footer-section">
-        <p>ক্রয় করার জন্য ধন্যবাদ! যেকোনো অনুসন্ধানে যোগাযোগ করুন।</p>
-        <p class="timestamp">প্রিন্ট সময়: ${new Date().toLocaleString('bn-BD')}</p>
-      </div>
-    </div>
-  </div>
-  <script>
-    window.onload = function() {
-      window.print();
-      setTimeout(function() { window.close(); }, 500);
-    };
-  </script>
-</body>
-</html>
-    `;
-
-    printWindow.document.write(htmlContent);
-    printWindow.document.close();
   };
 
-  // High-fidelity bulk invoice printing routine
-  const printBulkInvoices = (salesToPrint: any[]) => {
-    if (salesToPrint.length === 0) {
-      toast.error("প্রিন্ট করার জন্য কোনো ইনভয়েস সিলেক্ট করা নেই!");
-      return;
-    }
+  // Print preview configuration states
+  const [printPreviewSales, setPrintPreviewSales] = useState<any[] | null>(null);
+  const [printOptions, setPrintOptions] = useState({
+    paperSize: "A4" as "A4" | "58mm",
+    showSerial: true,
+    showRates: true, // unit price
+    showItemDiscount: true,
+    showTaxBreakdown: true,
+    showTotals: true,
+    showMeta: true,
+    showFooter: true,
+    showSignatures: true,
+    customNote: ""
+  });
 
-    const printWindow = window.open("", "_blank");
-    if (!printWindow) {
-      toast.error("প্রিন্ট উইন্ডো ওপেন করা সম্ভব হয়নি! পপ-আপ ব্লক সক্রিয় আছে কিনা চেক করুন।");
-      return;
-    }
-
+  // Master HTML print template generator
+  const generatePrintHTML = (salesToPrint: any[], options: typeof printOptions) => {
     const invoicesHtml = salesToPrint.map((sale) => {
       const selectedCustomer = customers.find(c => c.id === sale.customerId);
       const selectedRoute = routes.find(r => r.id === sale.routeId);
@@ -307,6 +104,7 @@ export default function SalesView({
             <div class="badge">ক্যাশ মেমো / ইনভয়েস</div>
           </div>
           
+          ${options.showMeta ? `
           <div class="meta-section">
             <div class="meta-col">
               <p><strong>মেমো আইডি:</strong> #${sale.id ? sale.id.slice(0, 8).toUpperCase() : 'N/A'}</p>
@@ -319,15 +117,24 @@ export default function SalesView({
               <p><strong>ইস্যুকারী:</strong> ${sale.createdBy || 'Unknown'}</p>
             </div>
           </div>
+          ` : `
+          <div class="meta-section" style="margin-bottom: 10px; font-size: 11px; display: flex; justify-content: space-between; border-bottom: 1px dotted #ccc; padding-bottom: 5px;">
+            <span><strong>মেমো:</strong> #${sale.id ? sale.id.slice(0, 8).toUpperCase() : 'N/A'}</span>
+            <span><strong>তারিখ:</strong> ${new Date(sale.date).toLocaleDateString('bn-BD')}</span>
+            <span><strong>গ্রাহক:</strong> ${selectedCustomer?.name || "নগদ কাস্টমার"}</span>
+          </div>
+          `}
           
           <table class="items-table">
             <thead>
               <tr>
-                <th style="width: 8%;">ক্রমিক</th>
+                ${options.showSerial ? `<th style="width: 8%;">ক্রমিক</th>` : ''}
                 <th>পণ্যের বিবরণ</th>
-                <th style="text-align: center; width: 25%;">পরিমাণ (Ctn/Pcs)</th>
-                <th style="text-align: right; width: 15%;">দর (Pcs)</th>
-                <th style="text-align: right; width: 18%;">মোট মূল্য</th>
+                <th style="text-align: center; width: 22%;">পরিমাণ (Ctn/Pcs)</th>
+                ${options.showRates ? `<th style="text-align: right; width: 14%;">দর (Pcs)</th>` : ''}
+                ${options.showItemDiscount ? `<th style="text-align: right; width: 14%;">ডিসকাউন্ট</th>` : ''}
+                ${options.showTaxBreakdown ? `<th style="text-align: right; width: 14%;">ভ্যাট/ট্যাক্স</th>` : ''}
+                ${options.showTotals ? `<th style="text-align: right; width: 16%;">মোট মূল্য</th>` : ''}
               </tr>
             </thead>
             <tbody>
@@ -335,8 +142,15 @@ export default function SalesView({
                 const prod = products.find(p => p.id === (item.productId || item.id));
                 const name = prod?.name || item.name || 'অজানা পণ্য';
                 const qty = Number(item.qty || item.quantity || 0);
-                const price = Number(item.price || 0);
+                const price = Number(item.price || item.unitPrice || 0);
                 const cartonSize = Number(prod?.cartoonSize || prod?.cartonSize || 1);
+                
+                const discount = Number(item.discount || 0);
+                const calculatedDiscount = item.calculatedDiscount ? Number(item.calculatedDiscount) : (item.discountType === 'percent' ? (qty * price * discount / 100) : discount);
+                
+                const taxPercent = company?.taxPercent || 0;
+                const vatPercent = company?.vatPercent || 0;
+                const calculatedTax = (qty * price - calculatedDiscount) * (taxPercent + vatPercent) / 100;
                 
                 let qtyStr = `${qty} Pcs`;
                 if (cartonSize > 1) {
@@ -348,47 +162,229 @@ export default function SalesView({
                   qtyStr = `${pts.join('/')} (${qty} Pcs)`;
                 }
                 
+                const rowTotal = qty * price - calculatedDiscount + (options.showTaxBreakdown ? calculatedTax : 0);
+                
                 return `
                   <tr>
-                    <td>${idx + 1}</td>
+                    ${options.showSerial ? `<td>${idx + 1}</td>` : ''}
                     <td class="font-bold">${name}</td>
                     <td style="text-align: center; font-weight: bold;">${qtyStr}</td>
-                    <td style="text-align: right;">${price.toFixed(2)} ৳</td>
-                    <td style="text-align: right; font-weight: bold;">${(qty * price).toFixed(2)} ৳</td>
+                    ${options.showRates ? `<td style="text-align: right;">${price.toFixed(2)} ৳</td>` : ''}
+                    ${options.showItemDiscount ? `<td style="text-align: right; color: #dc2626;">${calculatedDiscount > 0 ? `-${calculatedDiscount.toFixed(2)} ৳` : '0.00 ৳'}</td>` : ''}
+                    ${options.showTaxBreakdown ? `<td style="text-align: right; color: #4f46e5;">${calculatedTax > 0 ? `${calculatedTax.toFixed(2)} ৳` : '0.00 ৳'}</td>` : ''}
+                    ${options.showTotals ? `<td style="text-align: right; font-weight: bold;">${rowTotal.toFixed(2)} ৳</td>` : ''}
                   </tr>
                 `;
               }).join('')}
             </tbody>
           </table>
           
-          <div class="totals-section">
-            <div class="totals-box">
-              <div class="total-row">
-                <span>মোট বিল:</span>
-                <span>${Number(sale.total || 0).toFixed(2)} ৳</span>
-              </div>
-              <div class="total-row grand-total">
-                <span>চূড়ান্ত নিট বিল:</span>
-                <span>${Number(sale.total || 0).toFixed(2)} ৳</span>
+          ${options.showTotals ? (() => {
+            const itemTotals = (sale.items || []).reduce((sum: number, item: any) => {
+              const qty = Number(item.qty || item.quantity || 0);
+              const price = Number(item.price || item.unitPrice || 0);
+              return sum + (qty * price);
+            }, 0);
+            const totalDiscounts = (sale.items || []).reduce((sum: number, item: any) => {
+              const qty = Number(item.qty || item.quantity || 0);
+              const price = Number(item.price || item.unitPrice || 0);
+              const discount = Number(item.discount || 0);
+              const calculatedDiscount = item.calculatedDiscount ? Number(item.calculatedDiscount) : (item.discountType === 'percent' ? (qty * price * discount / 100) : discount);
+              return sum + calculatedDiscount;
+            }, 0);
+            const taxPercent = company?.taxPercent || 0;
+            const vatPercent = company?.vatPercent || 0;
+            const totalTax = (sale.items || []).reduce((sum: number, item: any) => {
+              const qty = Number(item.qty || item.quantity || 0);
+              const price = Number(item.price || item.unitPrice || 0);
+              const discount = Number(item.discount || 0);
+              const calculatedDiscount = item.calculatedDiscount ? Number(item.calculatedDiscount) : (item.discountType === 'percent' ? (qty * price * discount / 100) : discount);
+              return sum + ((qty * price - calculatedDiscount) * (taxPercent + vatPercent) / 100);
+            }, 0);
+            const netBill = itemTotals - totalDiscounts + (options.showTaxBreakdown ? totalTax : 0);
+
+            return `
+            <div class="totals-section">
+              <div class="totals-box">
+                <div class="total-row">
+                  <span>উপ-মোট বিল (Subtotal):</span>
+                  <span>${itemTotals.toFixed(2)} ৳</span>
+                </div>
+                ${options.showItemDiscount && totalDiscounts > 0 ? `
+                <div class="total-row" style="color: #dc2626;">
+                  <span>মোট ডিসকাউন্ট (Discount):</span>
+                  <span>-${totalDiscounts.toFixed(2)} ৳</span>
+                </div>
+                ` : ''}
+                ${options.showTaxBreakdown && totalTax > 0 ? `
+                <div class="total-row" style="color: #4f46e5;">
+                  <span>ভ্যাট ও ট্যাক্স (${(taxPercent + vatPercent)}%):</span>
+                  <span>+${totalTax.toFixed(2)} ৳</span>
+                </div>
+                ` : ''}
+                <div class="total-row grand-total">
+                  <span>চূড়ান্ত নিট বিল (Net Total):</span>
+                  <span>${Number(sale.total || netBill).toFixed(2)} ৳</span>
+                </div>
               </div>
             </div>
+            `;
+          })() : ''}
+
+          ${options.customNote ? `
+          <div style="margin-top: 15px; border: 1px dashed #000; padding: 10px; font-size: 11px; border-radius: 4px; background: #fafafa;">
+            <strong>विशेष नोट:</strong> ${options.customNote}
           </div>
+          ` : ''}
+
+          ${options.showSignatures ? `
+          <div style="display: flex; justify-content: space-between; margin-top: 60px; font-size: 11px;">
+            <div style="border-top: 1px solid #000; width: 28%; text-align: center; padding-top: 5px;">গ্রাহকের স্বাক্ষর</div>
+            <div style="border-top: 1px solid #000; width: 28%; text-align: center; padding-top: 5px;">ডেলিভারিম্যান স্বাক্ষর</div>
+            <div style="border-top: 1px solid #000; width: 28%; text-align: center; padding-top: 5px;">অনুমোদিত স্বাক্ষর</div>
+          </div>
+          ` : ''}
           
+          ${options.showFooter ? `
           <div class="footer-section">
             <p>ক্রয় করার জন্য ধন্যবাদ! যেকোনো অনুসন্ধানে যোগাযোগ করুন।</p>
             <p class="timestamp">প্রিন্ট সময়: ${new Date().toLocaleString('bn-BD')}</p>
           </div>
+          ` : ''}
         </div>
       `;
-    }).join("");
+    }).join('');
 
-    const htmlContent = `
+    return `
 <!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
-  <title>বাল্ক বিক্রয় মেমো প্রিন্ট (${salesToPrint.length} টি)</title>
+  <title>বিক্রয় মেমো প্রিন্ট (${salesToPrint.length} টি)</title>
   <style>
+    ${options.paperSize === "58mm" ? `
+    @page {
+      size: 58mm auto;
+      margin: 0;
+    }
+    body {
+      font-family: 'Courier New', Courier, monospace, 'Noto Sans Bengali', sans-serif;
+      color: #000;
+      background: #fff;
+      margin: 0 auto;
+      padding: 4px 6px;
+      width: 48mm;
+      box-sizing: border-box;
+      font-size: 10px;
+      line-height: 1.3;
+    }
+    .print-container {
+      width: 100%;
+    }
+    .invoice-sheet {
+      background: #fff;
+      padding: 2px 0 15px 0;
+      box-sizing: border-box;
+      border-bottom: 2px dashed #000;
+      page-break-after: always;
+    }
+    .invoice-sheet:last-child {
+      page-break-after: avoid;
+      border-bottom: none;
+    }
+    .brand-section {
+      text-align: center;
+      margin-bottom: 10px;
+      border-bottom: 1px dashed #000;
+      padding-bottom: 6px;
+    }
+    .brand-section h2 {
+      font-size: 14px;
+      margin: 0 0 2px 0;
+      font-weight: 900;
+    }
+    .brand-section .subtitle {
+      font-size: 8px;
+      margin: 0 0 4px 0;
+      color: #000;
+    }
+    .brand-section .badge {
+      display: inline-block;
+      border: 1px solid #000;
+      padding: 1px 6px;
+      font-size: 8px;
+      font-weight: bold;
+      text-transform: uppercase;
+    }
+    .meta-section {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 9px;
+      line-height: 1.4;
+      border-bottom: 1px dotted #000;
+      padding-bottom: 4px;
+    }
+    .meta-col {
+      width: 100%;
+    }
+    .meta-col p {
+      margin: 2px 0;
+    }
+    .items-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 9px;
+      margin-bottom: 8px;
+    }
+    .items-table th {
+      border-top: 1px dashed #000;
+      border-bottom: 1px dashed #000;
+      padding: 4px 1px;
+      font-weight: bold;
+    }
+    .items-table td {
+      border-bottom: 1px dotted #000;
+      padding: 4px 1px;
+    }
+    .font-bold {
+      font-weight: bold;
+    }
+    .totals-section {
+      display: block;
+      margin-top: 4px;
+      margin-bottom: 8px;
+    }
+    .totals-box {
+      width: 100%;
+      font-size: 9px;
+    }
+    .total-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 2px 0;
+    }
+    .grand-total {
+      font-weight: bold;
+      font-size: 11px;
+      border-top: 1px dashed #000;
+      border-bottom: 2px double #000;
+      padding: 5px 0;
+      margin-top: 2px;
+    }
+    .footer-section {
+      text-align: center;
+      font-size: 8px;
+      margin-top: 15px;
+      border-top: 1px dashed #000;
+      padding-top: 6px;
+    }
+    .footer-section p {
+      margin: 1px 0;
+    }
+    .timestamp {
+      color: #000;
+    }
+    ` : `
     body {
       font-family: 'Courier New', Courier, monospace, 'Noto Sans Bengali', sans-serif;
       color: #000;
@@ -507,6 +503,7 @@ export default function SalesView({
     .timestamp {
       color: #666;
     }
+    `}
   </style>
 </head>
 <body>
@@ -522,9 +519,31 @@ export default function SalesView({
 </body>
 </html>
     `;
+  };
 
+  // Trigger high-fidelity print window
+  const triggerBrowserPrint = () => {
+    if (!printPreviewSales || printPreviewSales.length === 0) return;
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      toast.error("প্রিন্ট উইন্ডো ওপেন করা সম্ভব হয়নি! পপ-আপ ব্লক সক্রিয় আছে কিনা চেক করুন।");
+      return;
+    }
+    const htmlContent = generatePrintHTML(printPreviewSales, printOptions);
     printWindow.document.write(htmlContent);
     printWindow.document.close();
+  };
+
+  const printInvoice = (sale: any) => {
+    setPrintPreviewSales([sale]);
+  };
+
+  const printBulkInvoices = (salesToPrint: any[]) => {
+    if (salesToPrint.length === 0) {
+      toast.error("প্রিন্ট করার জন্য কোনো ইনভয়েস সিলেক্ট করা নেই!");
+      return;
+    }
+    setPrintPreviewSales(salesToPrint);
   };
 
   // Edit States
@@ -763,6 +782,47 @@ export default function SalesView({
 
   return (
     <ReportWrapper title="বিক্রয় হিস্ট্রি" onDownload={downloadCSV} onShare={shareWhatsApp}>
+      {/* Offline Sync Status Indicator */}
+      <div className="mb-4 bg-slate-50 p-4 border border-slate-150 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-3 shadow-2xs">
+        <div className="flex items-center gap-3">
+          <div className={`p-2.5 rounded-xl ${unsyncedSalesCount > 0 ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}`}>
+            {unsyncedSalesCount > 0 ? <WifiOff className="w-5 h-5 animate-pulse" /> : <Wifi className="w-5 h-5" />}
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-black text-slate-900">
+                {unsyncedSalesCount > 0 ? "অফলাইন লেনদেন পেন্ডিং কিউ (Offline Queue)" : "ক্লাউড সিঙ্ক্রোনাইজেশন স্ট্যাটাস (Cloud Sync)"}
+              </span>
+              <span className={`px-2 py-0.5 text-[10px] font-bold rounded-md ${
+                unsyncedSalesCount > 0 
+                  ? "bg-amber-100 text-amber-800 border border-amber-200" 
+                  : "bg-emerald-100 text-emerald-800 border border-emerald-200"
+              }`}>
+                {unsyncedSalesCount > 0 ? `${unsyncedSalesCount} টি পেন্ডিং (Pending)` : "সম্পূর্ণ সিঙ্কড (Synced)"}
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 font-semibold mt-0.5">
+              {unsyncedSalesCount > 0 
+                ? "কিছু বিক্রয় মেমো ক্লাউডে সিঙ্ক হওয়ার জন্য অপেক্ষা করছে। ইন্টারনেট পুনরায় সংযুক্ত হলে এগুলো স্বয়ংক্রিয়ভাবে ক্লাউডে আপলোড হবে।"
+                : "আপনার সকল বিক্রয় মেমো এবং অফলাইন মেমো সফলভাবে ক্লাউড ডাটাবেজের সাথে সিঙ্কড করা রয়েছে।"}
+            </p>
+          </div>
+        </div>
+        
+        <button
+          onClick={handleRetrySync}
+          disabled={isSyncing}
+          className={`px-4 py-2 text-xs font-bold rounded-xl flex items-center gap-2 transition-all shadow-2xs border cursor-pointer ${
+            isSyncing 
+              ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed" 
+              : "bg-indigo-600 hover:bg-indigo-700 text-white border-indigo-500"
+          }`}
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? "animate-spin" : ""}`} />
+          {isSyncing ? "সিঙ্ক হচ্ছে..." : "পুনরায় সিঙ্ক করুন (Retry Sync)"}
+        </button>
+      </div>
+
       <div className="bg-white p-4 border rounded-xl grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-8 gap-3">
           <input 
             placeholder="কাস্টমার নাম খুঁজুন..." 
@@ -1104,6 +1164,230 @@ export default function SalesView({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* State-Driven Print Preview & Customization Modal */}
+      {printPreviewSales && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl shadow-2xl border border-gray-100 max-w-5xl w-full flex flex-col md:flex-row overflow-hidden animate-in fade-in zoom-in-95 duration-200" style={{ maxHeight: "90vh" }}>
+            
+            {/* Left: Configuration Sidebar */}
+            <div className="w-full md:w-80 bg-slate-50 border-r border-slate-100 p-6 flex flex-col justify-between overflow-y-auto">
+              <div>
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="font-black text-slate-900 text-base flex items-center gap-2">
+                    <Printer className="w-5 h-5 text-indigo-600" />
+                    <span>প্রিন্ট প্রিভিউ সেটিংস</span>
+                  </h3>
+                  <button 
+                    onClick={() => setPrintPreviewSales(null)} 
+                    className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded-full transition"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                <p className="text-xs text-slate-500 font-medium mb-4 leading-relaxed">
+                  নিচের অপশনগুলো সিলেক্ট বা আন-সিলেক্ট করে প্রিন্ট লেআউট কাস্টমাইজ করুন। এটি আপনার খাতার রেকর্ডের জন্য নিখুঁত প্রিন্ট তৈরি করতে সাহায্য করবে।
+                </p>
+
+                {/* Paper Size Selector */}
+                <div className="mb-5 bg-slate-200/50 p-1.5 rounded-2xl flex gap-1 border border-slate-300/40">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPrintOptions(prev => ({
+                        ...prev,
+                        paperSize: "A4",
+                        showSerial: true,
+                        showRates: true,
+                        showSignatures: true,
+                        showMeta: true
+                      }));
+                    }}
+                    className={`flex-1 py-2 text-[11px] font-black rounded-xl transition cursor-pointer ${printOptions.paperSize === "A4" ? "bg-white text-indigo-650 shadow-xs" : "text-slate-500 hover:text-slate-800"}`}
+                  >
+                    Standard A4
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPrintOptions(prev => ({
+                        ...prev,
+                        paperSize: "58mm",
+                        showSerial: false,
+                        showRates: true,
+                        showSignatures: false,
+                        showMeta: true
+                      }));
+                    }}
+                    className={`flex-1 py-2 text-[11px] font-black rounded-xl transition cursor-pointer ${printOptions.paperSize === "58mm" ? "bg-white text-indigo-650 shadow-xs" : "text-slate-500 hover:text-slate-800"}`}
+                  >
+                    POS (58mm)
+                  </button>
+                </div>
+
+                {/* Column Visibility Configuration Section */}
+                <div className="bg-slate-50 border border-slate-200 p-4 rounded-2xl mb-4 shadow-2xs">
+                  <h4 className="text-[11px] font-black text-indigo-700 uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 bg-indigo-650 rounded-full"></span>
+                    কলাম প্রদর্শন কনফিগারেশন (Data Columns)
+                  </h4>
+                  <div className="space-y-2.5">
+                    <label className="flex items-center gap-3 p-2 bg-white rounded-xl border border-slate-200/60 shadow-2xs cursor-pointer select-none hover:bg-indigo-50/20 transition active:scale-98">
+                      <input 
+                        type="checkbox" 
+                        checked={printOptions.showSerial}
+                        onChange={(e) => setPrintOptions(prev => ({ ...prev, showSerial: e.target.checked }))}
+                        className="rounded border-gray-350 text-indigo-600 focus:ring-indigo-500 cursor-pointer h-4.5 w-4.5"
+                      />
+                      <span className="text-xs font-black text-slate-800">ক্রমিক নং (Serial) কলাম</span>
+                    </label>
+
+                    <label className="flex items-center gap-3 p-2 bg-white rounded-xl border border-slate-200/60 shadow-2xs cursor-pointer select-none hover:bg-indigo-50/20 transition active:scale-98">
+                      <input 
+                        type="checkbox" 
+                        checked={printOptions.showRates}
+                        onChange={(e) => setPrintOptions(prev => ({ ...prev, showRates: e.target.checked }))}
+                        className="rounded border-gray-350 text-indigo-600 focus:ring-indigo-500 cursor-pointer h-4.5 w-4.5"
+                      />
+                      <span className="text-xs font-black text-slate-800">পণ্যের দর (Unit Price / Rate) কলাম</span>
+                    </label>
+
+                    <label className="flex items-center gap-3 p-2 bg-white rounded-xl border border-slate-200/60 shadow-2xs cursor-pointer select-none hover:bg-indigo-50/20 transition active:scale-98">
+                      <input 
+                        type="checkbox" 
+                        checked={printOptions.showItemDiscount}
+                        onChange={(e) => setPrintOptions(prev => ({ ...prev, showItemDiscount: e.target.checked }))}
+                        className="rounded border-gray-350 text-indigo-600 focus:ring-indigo-500 cursor-pointer h-4.5 w-4.5"
+                      />
+                      <span className="text-xs font-black text-slate-800">ডিসকাউন্ট (Discount) কলাম</span>
+                    </label>
+
+                    <label className="flex items-center gap-3 p-2 bg-white rounded-xl border border-slate-200/60 shadow-2xs cursor-pointer select-none hover:bg-indigo-50/20 transition active:scale-98">
+                      <input 
+                        type="checkbox" 
+                        checked={printOptions.showTaxBreakdown}
+                        onChange={(e) => setPrintOptions(prev => ({ ...prev, showTaxBreakdown: e.target.checked }))}
+                        className="rounded border-gray-350 text-indigo-600 focus:ring-indigo-500 cursor-pointer h-4.5 w-4.5"
+                      />
+                      <span className="text-xs font-black text-slate-800">ভ্যাট ও ট্যাক্স (Vat & Tax) কলাম</span>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Additional Layout Settings */}
+                <div className="bg-slate-50 border border-slate-200 p-4 rounded-2xl mb-4 shadow-2xs">
+                  <h4 className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 bg-slate-400 rounded-full"></span>
+                    লেআউট ও মেটা অপশন (Layout & Meta)
+                  </h4>
+                  <div className="space-y-2.5">
+                    <label className="flex items-center gap-3 p-2 bg-white rounded-xl border border-slate-200/60 shadow-2xs cursor-pointer select-none hover:bg-indigo-50/20 transition active:scale-98">
+                      <input 
+                        type="checkbox" 
+                        checked={printOptions.showTotals}
+                        onChange={(e) => setPrintOptions(prev => ({ ...prev, showTotals: e.target.checked }))}
+                        className="rounded border-gray-350 text-indigo-600 focus:ring-indigo-500 cursor-pointer h-4.5 w-4.5"
+                      />
+                      <span className="text-xs font-black text-slate-800">মোট মূল্য ও নিট বিল হিসাব</span>
+                    </label>
+
+                    <label className="flex items-center gap-3 p-2 bg-white rounded-xl border border-slate-200/60 shadow-2xs cursor-pointer select-none hover:bg-indigo-50/20 transition active:scale-98">
+                      <input 
+                        type="checkbox" 
+                        checked={printOptions.showMeta}
+                        onChange={(e) => setPrintOptions(prev => ({ ...prev, showMeta: e.target.checked }))}
+                        className="rounded border-gray-350 text-indigo-600 focus:ring-indigo-500 cursor-pointer h-4.5 w-4.5"
+                      />
+                      <span className="text-xs font-black text-slate-800">এস আর ও মেটা তথ্য প্রদর্শন</span>
+                    </label>
+
+                    <label className="flex items-center gap-3 p-2 bg-white rounded-xl border border-slate-200/60 shadow-2xs cursor-pointer select-none hover:bg-indigo-50/20 transition active:scale-98">
+                      <input 
+                        type="checkbox" 
+                        checked={printOptions.showSignatures}
+                        onChange={(e) => setPrintOptions(prev => ({ ...prev, showSignatures: e.target.checked }))}
+                        className="rounded border-gray-350 text-indigo-600 focus:ring-indigo-500 cursor-pointer h-4.5 w-4.5"
+                      />
+                      <span className="text-xs font-black text-slate-800">স্বাক্ষরের খালি জায়গা (Signatures)</span>
+                    </label>
+
+                    <label className="flex items-center gap-3 p-2 bg-white rounded-xl border border-slate-200/60 shadow-2xs cursor-pointer select-none hover:bg-indigo-50/20 transition active:scale-98">
+                      <input 
+                        type="checkbox" 
+                        checked={printOptions.showFooter}
+                        onChange={(e) => setPrintOptions(prev => ({ ...prev, showFooter: e.target.checked }))}
+                        className="rounded border-gray-350 text-indigo-600 focus:ring-indigo-500 cursor-pointer h-4.5 w-4.5"
+                      />
+                      <span className="text-xs font-black text-slate-800">ধন্যবাদ বার্তা ও ফুট নোট</span>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Custom Note input */}
+                <div className="mt-5">
+                  <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5">বিশেষ নোট যোগ করুন (ঐচ্ছিক):</label>
+                  <textarea 
+                    value={printOptions.customNote}
+                    onChange={(e) => setPrintOptions(prev => ({ ...prev, customNote: e.target.value }))}
+                    className="w-full border border-gray-200 rounded-xl p-2 text-xs bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none resize-none font-medium text-slate-800 h-16"
+                    placeholder="যেমন: ড্যামেজ মাল ফেরত নেওয়া হয়েছে..."
+                  />
+                </div>
+              </div>
+
+              {/* Sidebar bottom buttons */}
+              <div className="flex flex-col gap-2 mt-6">
+                <button 
+                  onClick={triggerBrowserPrint}
+                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-xl flex items-center justify-center gap-2 text-xs font-black transition cursor-pointer shadow-md active:scale-98"
+                >
+                  <Printer className="w-4 h-4" />
+                  <span>প্রিন্ট করুন (Print Now)</span>
+                </button>
+                <button 
+                  onClick={() => setPrintPreviewSales(null)}
+                  className="w-full bg-white hover:bg-slate-100 border text-slate-700 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer"
+                >
+                  বন্ধ করুন
+                </button>
+              </div>
+            </div>
+
+            {/* Right: Live Frame Preview */}
+            <div className="flex-1 bg-slate-800 p-6 flex flex-col justify-between overflow-hidden">
+              <div className="flex justify-between items-center mb-3">
+                <h4 className="text-xs font-black uppercase tracking-wider text-slate-300 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <span>লাইভ পেপার লেআউট প্রিভিউ ({printPreviewSales.length} টি ইনভয়েস)</span>
+                </h4>
+                <span className="text-[10px] font-mono font-bold text-slate-400 bg-slate-700/60 px-2 py-0.5 rounded-md">
+                  {printOptions.paperSize === "58mm" ? "58mm Thermal POS" : "A4 Portrait"}
+                </span>
+              </div>
+
+              {/* Dynamic Live Preview IFrame */}
+              <div className="flex-1 border border-slate-700 rounded-2xl overflow-hidden bg-slate-900 shadow-2xl relative flex items-center justify-center p-2">
+                <div 
+                  className={`h-full bg-white transition-all duration-300 shadow-xl overflow-hidden rounded-lg ${
+                    printOptions.paperSize === "58mm" ? "w-[240px] border-x-2 border-dashed border-gray-400" : "w-full"
+                  }`}
+                >
+                  <iframe 
+                    title="Invoice Print Live Preview"
+                    srcDoc={generatePrintHTML(printPreviewSales, printOptions).replace("<script>\n    window.onload = function() {\n      window.print();\n      setTimeout(function() { window.close(); }, 500);\n    };\n  </script>", "")}
+                    className="w-full h-full border-0"
+                  />
+                </div>
+              </div>
+
+              <div className="text-center text-[10px] text-slate-400 font-semibold mt-3">
+                * প্রিভিউ স্ক্রিনটি কাগজের আউটপুটের একটি আনুমানিক রূপ দেখায়। ব্রাউজারের প্রিন্ট ডায়ালগে ব্যাকগ্রাউন্ড গ্রাফিক্স সক্রিয় রাখুন।
+              </div>
+            </div>
+
           </div>
         </div>
       )}

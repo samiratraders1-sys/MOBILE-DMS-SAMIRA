@@ -33,6 +33,7 @@ export default function InventoryView({ products, add, update, remove, suppliers
   const [showAdd, setShowAdd] = useState(false);
   const [showBulk, setShowBulk] = useState(false);
   const [bulkText, setBulkText] = useState("");
+  const [bulkJsonText, setBulkJsonText] = useState("");
   const [search, setSearch] = useState("");
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [selectedSuppliers, setSelectedSuppliers] = useState<string[]>([]);
@@ -81,6 +82,28 @@ export default function InventoryView({ products, add, update, remove, suppliers
   // Voice search states
   const [isListening, setIsListening] = useState(false);
   const [voiceLang, setVoiceLang] = useState<"bn-BD" | "en-US">("bn-BD");
+
+  // Bulk Operation States
+  const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
+  const [bulkOpType, setBulkOpType] = useState<"PRICE_INCREASE" | "CATEGORY_REASSIGN" | "MIN_STOCK_UPDATE" | "BULK_DELETE" | "">("");
+  const [bulkPricePercent, setBulkPricePercent] = useState<string>("");
+  const [bulkPriceTarget, setBulkPriceTarget] = useState<"PRICE" | "COST" | "BOTH">("PRICE");
+  const [bulkNewCategory, setBulkNewCategory] = useState<string>("");
+  const [bulkMinStockLevel, setBulkMinStockLevel] = useState<string>("");
+  const [bulkMinStockCategory, setBulkMinStockCategory] = useState<string>("");
+  const [isApplyingBulk, setIsApplyingBulk] = useState(false);
+
+  // QR Replenish Simulation States
+  const [showQRReplenish, setShowQRReplenish] = useState(false);
+  const [simulatedProductId, setSimulatedProductId] = useState<string>("");
+  const [simulatedQty, setSimulatedQty] = useState<string>("");
+  const [isSavingSimulated, setIsSavingSimulated] = useState(false);
+
+  // Category Min Stock Bulk Update Modal States
+  const [showMinStockModal, setShowMinStockModal] = useState(false);
+  const [minStockBulkCategory, setMinStockBulkCategory] = useState("");
+  const [minStockBulkLevel, setMinStockBulkLevel] = useState("");
+  const [isSavingMinStockBulk, setIsSavingMinStockBulk] = useState(false);
 
   const { confirmDelete } = useConfirm();
 
@@ -632,6 +655,447 @@ export default function InventoryView({ products, add, update, remove, suppliers
       toast.success("ইম্পোর্টটি আনডু করা হয়েছে");
   };
 
+  const handleJsonFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.type !== "application/json" && !file.name.endsWith(".json")) {
+      toast.error("শুধুমাত্র .json ফাইল আপলোড করা যাবে!");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const text = event.target?.result as string;
+        setBulkJsonText(text);
+        toast.success("JSON ফাইলটি সফলভাবে পড়া হয়েছে। নিচের বক্সে প্রিভিউ দেখতে পাচ্ছেন।");
+      } catch (err) {
+        toast.error("ফাইল পড়তে সমস্যা হয়েছে।");
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleJsonBulkImport = async () => {
+    try {
+      const parsed = JSON.parse(bulkJsonText.trim());
+      if (!Array.isArray(parsed)) {
+        toast.error("JSON অবশ্যই একটি Array হতে হবে!");
+        return;
+      }
+
+      let total = 0;
+      let created = 0;
+      let updated = 0;
+      let skipped = 0;
+      const details: string[] = [];
+
+      for (let i = 0; i < parsed.length; i++) {
+        const item = parsed[i];
+        total++;
+
+        // Extract keys flexibly (CamelCase, capital, or spacing)
+        const name = (item.name || item.Name || "").trim();
+        const sku = (item.sku || item.SKU || "").trim();
+        const category = item.category || item.Category || "General";
+        const stock = Number(item.stock !== undefined ? item.stock : (item.Stock !== undefined ? item.Stock : 0));
+        const price = Number(item.price !== undefined ? item.price : (item.Price !== undefined ? item.Price : (item.salePrice !== undefined ? item.salePrice : (item["Sale Price"] !== undefined ? item["Sale Price"] : 0))));
+        const cost = Number(item.cost !== undefined ? item.cost : (item.Cost !== undefined ? item.Cost : (item.purchaseCost !== undefined ? item.purchaseCost : (item["Purchase Cost"] !== undefined ? item["Purchase Cost"] : 0))));
+        const cartoonSize = Number(item.cartoonSize !== undefined ? item.cartoonSize : (item.cartonSize !== undefined ? item.cartonSize : (item.CartoonSize !== undefined ? item.CartoonSize : (item.CartonSize !== undefined ? item.CartonSize : (item["Carton Size"] !== undefined ? item["Carton Size"] : 1)))));
+        const unit = item.unit || item.Unit || "Pcs";
+        const tempSupplier = item.supplierName || item.SupplierName || item["Supplier Name"] || "";
+
+        if (!name) {
+          skipped++;
+          details.push(`আইটেম ${i + 1}: পণ্যের নাম (name) খালি ছিল, স্কিপ করা হয়েছে।`);
+          continue;
+        }
+
+        // Find supplier by name in collections
+        let foundSupplierId = "";
+        if (tempSupplier) {
+          const matched = suppliers.find(
+            s => (s.name || "").trim().toLowerCase() === String(tempSupplier).trim().toLowerCase()
+          );
+          if (matched) {
+            foundSupplierId = matched.id;
+          }
+        }
+
+        // Check if SKU exists or name matches
+        const existing = products.find(p => (sku && p.sku && p.sku.toLowerCase() === sku.toLowerCase()) || p.name.trim().toLowerCase() === name.toLowerCase());
+
+        const productData = {
+          name,
+          sku,
+          category,
+          stock,
+          price,
+          cost,
+          cartoonSize,
+          unit,
+          supplierId: foundSupplierId || existing?.supplierId || "",
+          minStockLevel: 5
+        };
+
+        try {
+          if (existing) {
+            const prevStock = Number(existing.stock) || 0;
+            await update(existing.id, { ...existing, ...productData });
+            if (prevStock !== stock) {
+              if (stockAdjustments && stockAdjustments.add) {
+                await stockAdjustments.add({
+                  productId: existing.id,
+                  productName: name,
+                  sku: sku,
+                  previousStock: prevStock,
+                  newStock: stock,
+                  quantityChanged: stock - prevStock,
+                  reason: "জেসন বাল্ক আপলোড স্টক আপডেট (JSON Bulk Stock Update)",
+                  date: new Date().toISOString(),
+                  user: user?.email || "Unknown"
+                });
+              }
+              await recordStockMovement(existing.id, 'ADJUSTMENT', stock - prevStock, existing.id);
+            }
+            updated++;
+            details.push(`[UPDATE] ${name} (SKU: ${sku || 'N/A'}) - স্টক: ${stock}`);
+          } else {
+            // Check if SKU is duplicated across existing list
+            if (sku) {
+              const duplicateSku = products.find(p => p.sku && p.sku.toLowerCase() === sku.toLowerCase());
+              if (duplicateSku) {
+                skipped++;
+                details.push(`[DUPLICATE SKU] ${name} (SKU: ${sku}) ইতিমধ্যে "${duplicateSku.name}" পণ্যটির জন্য ব্যবহৃত হচ্ছে। স্কিপ করা হয়েছে।`);
+                continue;
+              }
+            }
+            
+            const newId = await add(productData);
+            if (newId) {
+              if (stock > 0) {
+                if (stockAdjustments && stockAdjustments.add) {
+                  await stockAdjustments.add({
+                    productId: newId,
+                    productName: name,
+                    sku: sku,
+                    previousStock: 0,
+                    newStock: stock,
+                    quantityChanged: stock,
+                    reason: "জেসন বাল্ক আপলোড নতুন পণ্য (JSON Bulk New Product)",
+                    date: new Date().toISOString(),
+                    user: user?.email || "Unknown"
+                  });
+                }
+                await recordStockMovement(newId, 'OPENING', stock, newId);
+              }
+              created++;
+              details.push(`[NEW] ${name} (SKU: ${sku || 'N/A'}) - নতুন পণ্য সফলভাবে যুক্ত হয়েছে।`);
+            } else {
+              skipped++;
+              details.push(`[FAILED] ${name} সংরক্ষণ করা সম্ভব হয়নি।`);
+            }
+          }
+        } catch (err: any) {
+          skipped++;
+          details.push(`[ERROR] ${name}: ${err.message}`);
+        }
+      }
+
+      setBulkJsonText("");
+      setImportReport({ total, created, updated, skipped, details });
+      toast.success(`জেসন ইম্পোর্ট সম্পন্ন: ${created} টি নতুন পণ্য এবং ${updated} টি পণ্য আপডেট করা হয়েছে।`);
+    } catch (error: any) {
+      console.error("JSON Parse error:", error);
+      toast.error("জেসন ফরম্যাট সঠিক নয়! অনুগ্রহ করে ভ্যালিড JSON পেস্ট করুন।");
+    }
+  };
+
+  const handleApplyBulkOperations = async () => {
+    if (!bulkOpType) {
+      toast.error("অনুগ্রহ করে একটি বাল্ক অপারেশন সিলেক্ট করুন!");
+      return;
+    }
+
+    if (selectedProductIds.length === 0 && bulkOpType !== "MIN_STOCK_UPDATE") {
+      toast.error("কোনো পণ্য সিলেক্ট করা হয়নি!");
+      return;
+    }
+
+    setIsApplyingBulk(true);
+    let successCount = 0;
+    let failCount = 0;
+
+    try {
+      if (bulkOpType === "PRICE_INCREASE") {
+        const percent = parseFloat(bulkPricePercent);
+        if (isNaN(percent)) {
+          toast.error("অনুগ্রহ করে সঠিক শতকরা হার লিখুন!");
+          setIsApplyingBulk(false);
+          return;
+        }
+
+        for (const id of selectedProductIds) {
+          const p = products.find(prod => prod.id === id);
+          if (!p) continue;
+
+          let updatedPrice = p.price;
+          let updatedCost = p.cost || 0;
+
+          if (bulkPriceTarget === "PRICE" || bulkPriceTarget === "BOTH") {
+            updatedPrice = Number((p.price * (1 + percent / 100)).toFixed(2));
+          }
+          if (bulkPriceTarget === "COST" || bulkPriceTarget === "BOTH") {
+            updatedCost = Number(((p.cost || 0) * (1 + percent / 100)).toFixed(2));
+          }
+
+          try {
+            await update(id, {
+              ...p,
+              price: updatedPrice,
+              cost: updatedCost
+            });
+            successCount++;
+          } catch (e) {
+            failCount++;
+            console.error(`Failed to update product ${id}:`, e);
+          }
+        }
+
+        toast.success(`সাফল্যের সাথে ${successCount} টি পণ্যের দাম ${percent}% পরিবর্তন করা হয়েছে!`);
+        if (failCount > 0) {
+          toast.error(`${failCount} টি পণ্যের দাম পরিবর্তন করা যায়নি।`);
+        }
+      } else if (bulkOpType === "CATEGORY_REASSIGN") {
+        const finalCategory = bulkNewCategory.trim();
+        if (!finalCategory) {
+          toast.error("অনুগ্রহ করে সঠিক ক্যাটাগরি নাম দিন!");
+          setIsApplyingBulk(false);
+          return;
+        }
+
+        for (const id of selectedProductIds) {
+          const p = products.find(prod => prod.id === id);
+          if (!p) continue;
+
+          try {
+            await update(id, {
+              ...p,
+              category: finalCategory
+            });
+            successCount++;
+          } catch (e) {
+            failCount++;
+            console.error(`Failed to update category for product ${id}:`, e);
+          }
+        }
+
+        toast.success(`সাফল্যের সাথে ${successCount} টি পণ্যের ক্যাটাগরি "${finalCategory}" এ পরিবর্তন করা হয়েছে!`);
+        if (failCount > 0) {
+          toast.error(`${failCount} টি পণ্যের ক্যাটাগরি পরিবর্তন করা যায়নি।`);
+        }
+      } else if (bulkOpType === "MIN_STOCK_UPDATE") {
+        const finalCategory = bulkMinStockCategory.trim();
+        const minLevel = parseInt(bulkMinStockLevel);
+        
+        if (!finalCategory) {
+          toast.error("অনুগ্রহ করে একটি ক্যাটাগরি সিলেক্ট করুন!");
+          setIsApplyingBulk(false);
+          return;
+        }
+        if (isNaN(minLevel) || minLevel < 0) {
+          toast.error("অনুগ্রহ করে সঠিক সর্বনিম্ন স্টক সংখ্যা দিন!");
+          setIsApplyingBulk(false);
+          return;
+        }
+
+        // Get all products that belong to the selected category
+        const targetProducts = products.filter(p => (p.category || "General") === finalCategory);
+        if (targetProducts.length === 0) {
+          toast.error(`"${finalCategory}" ক্যাটাগরিতে কোনো পণ্য পাওয়া যায়নি!`);
+          setIsApplyingBulk(false);
+          return;
+        }
+
+        for (const p of targetProducts) {
+          try {
+            await update(p.id, {
+              ...p,
+              minStockLevel: minLevel
+            });
+            successCount++;
+          } catch (e) {
+            failCount++;
+            console.error(`Failed to update minStockLevel for product ${p.id}:`, e);
+          }
+        }
+
+        toast.success(`সাফল্যের সাথে "${finalCategory}" ক্যাটাগরির ${successCount} টি পণ্যের সর্বনিম্ন স্টক লেভেল ${minLevel} পিস এ সেট করা হয়েছে!`);
+        if (failCount > 0) {
+          toast.error(`${failCount} টি পণ্যের সর্বনিম্ন স্টক লেভেল পরিবর্তন করা যায়নি।`);
+        }
+      }
+
+      // Reset selection and states
+      setSelectedProductIds([]);
+      setBulkOpType("");
+      setBulkPricePercent("");
+      setBulkNewCategory("");
+      setBulkMinStockLevel("");
+      setBulkMinStockCategory("");
+    } catch (err: any) {
+      console.error("Bulk action error:", err);
+      toast.error("বাল্ক অপারেশন চালানোর সময় ত্রুটি ঘটেছে!");
+    } finally {
+      setIsApplyingBulk(false);
+    }
+  };
+
+  const handleSimulateQRReplenish = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!simulatedProductId) {
+      toast.error("অনুগ্রহ করে একটি পণ্য সিলেক্ট করুন!");
+      return;
+    }
+    const qty = parseInt(simulatedQty);
+    if (isNaN(qty) || qty <= 0) {
+      toast.error("অনুগ্রহ করে সঠিক রিকুইজিশন সংখ্যা দিন!");
+      return;
+    }
+
+    setIsSavingSimulated(true);
+    try {
+      const p = products.find(prod => prod.id === simulatedProductId);
+      if (!p) {
+        toast.error("পণ্যটি খুঁজে পাওয়া যায়নি!");
+        setIsSavingSimulated(false);
+        return;
+      }
+
+      const prevStock = p.stock || 0;
+      const nextStock = prevStock + qty;
+
+      await update(simulatedProductId, {
+        ...p,
+        stock: nextStock
+      });
+
+      if (stockAdjustments && stockAdjustments.add) {
+        await stockAdjustments.add({
+          productId: simulatedProductId,
+          productName: p.name || "N/A",
+          sku: p.sku || "N/A",
+          previousStock: prevStock,
+          newStock: nextStock,
+          quantityChanged: qty,
+          reason: "QR স্ক্যান স্টক রিকুইজিশন (QR Scan Stock Replenishment)",
+          date: new Date().toISOString(),
+          user: user?.email || "Unknown"
+        });
+      }
+      await recordStockMovement(simulatedProductId, 'ADJUSTMENT', qty, simulatedProductId);
+
+      toast.success(`কিউআর স্ক্যান সিমুলেশন সফল! ${p.name} পণ্যের স্টক ${qty} পিস বৃদ্ধি করা হয়েছে। নতুন স্টক: ${nextStock}`);
+      setShowQRReplenish(false);
+      setSimulatedProductId("");
+      setSimulatedQty("");
+    } catch (err) {
+      console.error(err);
+      toast.error("স্টক সমন্বয় করতে ব্যর্থ হয়েছে!");
+    } finally {
+      setIsSavingSimulated(false);
+    }
+  };
+
+  const handleApplyMinStockCategoryBulk = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const finalCategory = minStockBulkCategory.trim();
+    const minLevel = parseInt(minStockBulkLevel);
+    
+    if (!finalCategory) {
+      toast.error("অনুগ্রহ করে একটি ক্যাটাগরি সিলেক্ট করুন!");
+      return;
+    }
+    if (isNaN(minLevel) || minLevel < 0) {
+      toast.error("অনুগ্রহ করে সঠিক সর্বনিম্ন স্টক সংখ্যা দিন!");
+      return;
+    }
+
+    setIsSavingMinStockBulk(true);
+    let successCount = 0;
+    let failCount = 0;
+
+    try {
+      const targetProducts = products.filter(p => (p.category || "General") === finalCategory);
+      if (targetProducts.length === 0) {
+        toast.error(`"${finalCategory}" ক্যাটাগরিতে কোনো পণ্য পাওয়া যায়নি!`);
+        setIsSavingMinStockBulk(false);
+        return;
+      }
+
+      for (const p of targetProducts) {
+        try {
+          await update(p.id, {
+            ...p,
+            minStockLevel: minLevel
+          });
+          successCount++;
+        } catch (e) {
+          failCount++;
+          console.error(`Failed to update minStockLevel for product ${p.id}:`, e);
+        }
+      }
+
+      toast.success(`সাফল্যের সাথে "${finalCategory}" ক্যাটাগরির ${successCount} টি পণ্যের সর্বনিম্ন স্টক লেভেল ${minLevel} পিস এ সেট করা হয়েছে!`);
+      if (failCount > 0) {
+        toast.error(`${failCount} টি পণ্যের সর্বনিম্ন স্টক লেভেল পরিবর্তন করা যায়নি।`);
+      }
+      setShowMinStockModal(false);
+      setMinStockBulkCategory("");
+      setMinStockBulkLevel("");
+    } catch (err) {
+      console.error(err);
+      toast.error("মিন স্টক বাল্ক আপডেট করতে ব্যর্থ হয়েছে!");
+    } finally {
+      setIsSavingMinStockBulk(false);
+    }
+  };
+
+  const handleBulkDelete = () => {
+    if (selectedProductIds.length === 0) {
+      toast.error("কোনো পণ্য সিলেক্ট করা হয়নি!");
+      return;
+    }
+
+    confirmDelete({
+      title: "🗑️ বাল্ক ডিলিট নিশ্চিতকরণ",
+      message: `আপনি কি নিশ্চিতভাবে সিলেক্ট করা ${selectedProductIds.length} টি পণ্য স্থায়ীভাবে ডিলিট করতে চান?`,
+      recordName: `${selectedProductIds.length} টি পণ্য`,
+      warning: "⚠️ এই কাজটি পরে ফিরিয়ে আনা যাবে না এবং এর ফলে ইনভেন্টরি ডেটা ও স্টক রেকর্ডস স্থায়ীভাবে মুছে যাবে।",
+      onConfirm: async () => {
+        let successCount = 0;
+        let failCount = 0;
+        for (const id of selectedProductIds) {
+          try {
+            await remove(id);
+            successCount++;
+          } catch (err) {
+            failCount++;
+            console.error(`Failed to delete product ${id}:`, err);
+          }
+        }
+        if (successCount > 0) {
+          toast.success(`সাফল্যের সাথে ${successCount} টি পণ্য ডিলিট করা হয়েছে!`);
+        }
+        if (failCount > 0) {
+          toast.error(`${failCount} টি পণ্য ডিলিট করা যায়নি।`);
+        }
+        setSelectedProductIds([]);
+      }
+    });
+  };
+
   const handleImportInventory = (data: any[]) => {
       setPreviewData(data);
   };
@@ -746,6 +1210,18 @@ export default function InventoryView({ products, add, update, remove, suppliers
       toast.success(`${created} টি নতুন পণ্য এবং ${updated} টি পণ্য আপডেট করা হয়েছে।`);
   };
 
+  const isAllSelected = filtered.length > 0 && filtered.every(p => selectedProductIds.includes(p.id));
+  const handleSelectAll = () => {
+    if (isAllSelected) {
+      setSelectedProductIds(prev => prev.filter(id => !filtered.some(p => p.id === id)));
+    } else {
+      setSelectedProductIds(prev => {
+        const union = new Set([...prev, ...filtered.map(p => p.id)]);
+        return Array.from(union);
+      });
+    }
+  };
+
   return (
     <div className="space-y-6">
       {previewData.length > 0 && <DataPreviewModal data={previewData} onCancel={() => setPreviewData([])} onConfirm={confirmImportInventory} />}
@@ -816,10 +1292,36 @@ export default function InventoryView({ products, add, update, remove, suppliers
           {role !== "sr" && (
             <>
               <button 
+                onClick={() => setShowMinStockModal(true)}
+                className="px-4 py-2 bg-indigo-50 text-indigo-700 rounded-xl font-bold text-sm border border-indigo-200 hover:bg-indigo-100 transition-all flex items-center gap-1.5 cursor-pointer font-bold"
+                title="ক্যাটাগরি অনুযায়ী মিনিমাম স্টক লেভেল বাল্ক আপডেট করুন"
+              >
+                📊 ক্যাটাগরি মিন স্টক আপডেট
+              </button>
+              <button 
+                onClick={() => setShowQRReplenish(true)}
+                className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold text-sm shadow-2xs transition-all flex items-center gap-1.5 cursor-pointer"
+                title="কিউআর কোড স্ক্যান করে স্টক বৃদ্ধির সিমুলেশন করুন"
+              >
+                📷 কিউআর সিমুলেশন (QR Simulation)
+              </button>
+              <button 
                 onClick={() => setShowBulk(true)}
                 className="px-4 py-2 bg-blue-50 text-blue-600 rounded-xl font-bold text-sm border border-blue-100 hover:bg-blue-100 transition-all font-bold"
               >
                 বাল্ক এন্ট্রি (Bulk)
+              </button>
+              <button 
+                onClick={handleBulkDelete}
+                disabled={selectedProductIds.length === 0}
+                className={`px-4 py-2 rounded-xl font-bold text-sm flex items-center gap-1.5 border transition-all cursor-pointer ${
+                  selectedProductIds.length > 0 
+                    ? "bg-red-50 text-red-650 border-red-200 hover:bg-red-100 shadow-2xs" 
+                    : "bg-gray-50 text-gray-400 border-gray-200 cursor-not-allowed opacity-60"
+                }`}
+                title={selectedProductIds.length > 0 ? "সিলেক্ট করা পণ্যগুলো ডিলিট করুন" : "ডিলিট করার জন্য টেবিল থেকে এক বা একাধিক পণ্য সিলেক্ট করুন"}
+              >
+                <Trash2 className="w-4 h-4" /> বাল্ক ডিলিট ({selectedProductIds.length})
               </button>
               <button 
                 onClick={() => { setShowAdd(true); setEditingId(null); }}
@@ -877,13 +1379,30 @@ export default function InventoryView({ products, add, update, remove, suppliers
           </div>
         </div>
         
-        <MultiSelect
-          options={categories.map(cat => ({ value: cat, label: cat }))}
-          selectedValues={selectedCategories}
-          onChange={setSelectedCategories}
-          placeholder="সকল ক্যাটাগরি"
-          className="w-full sm:w-52 shrink-0"
-        />
+        {/* 📁 Category-based Filter Dropdown for Quick Toggles */}
+        <div className="relative w-full sm:w-52 shrink-0">
+          <select
+            value={selectedCategories.length === 1 ? selectedCategories[0] : ""}
+            onChange={(e) => {
+              const val = e.target.value;
+              setSelectedCategories(val ? [val] : []);
+            }}
+            className="w-full pl-3 pr-8 py-3 bg-white border border-[#E9ECEF] rounded-xl font-bold text-xs text-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 appearance-none cursor-pointer shadow-2xs hover:border-slate-300 transition-all"
+            style={{
+              backgroundImage: `url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%234b5563' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3E%3C/svg%3E")`,
+              backgroundPosition: "right 0.75rem center",
+              backgroundSize: "1.2em 1.2em",
+              backgroundRepeat: "no-repeat"
+            }}
+          >
+            <option value="">📁 সকল সেগমেন্ট / ক্যাটাগরি</option>
+            {categories.map((cat) => (
+              <option key={cat} value={cat}>
+                📦 {cat}
+              </option>
+            ))}
+          </select>
+        </div>
 
         <MultiSelect
           options={suppliers.map(s => ({ value: s.id, label: s.name }))}
@@ -931,10 +1450,172 @@ export default function InventoryView({ products, add, update, remove, suppliers
         </button>
       </div>
 
+      {role !== "sr" && selectedProductIds.length > 0 && (
+        <div className="bg-indigo-50 border-2 border-indigo-200 rounded-2xl p-5 mb-5 shadow-sm">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-indigo-150 pb-4 mb-4">
+            <div className="flex items-center gap-2">
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-600 text-white font-mono text-xs font-black">
+                {selectedProductIds.length}
+              </span>
+              <span className="text-xs font-black text-indigo-950">
+                টি পণ্য সিলেক্ট করা হয়েছে। নিচের যেকোনো একটি বাল্ক অপারেশন সিলেক্ট করে পরিবর্তন করুন:
+              </span>
+            </div>
+            <button
+              onClick={() => {
+                setSelectedProductIds([]);
+                setBulkOpType("");
+              }}
+              className="text-xs font-bold text-red-600 hover:text-red-800 transition cursor-pointer"
+            >
+              ❌ সিলেকশন বাতিল করুন (Cancel Selection)
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-5 items-start">
+            {/* Operation Type selection buttons */}
+            <div className="md:col-span-4 space-y-2">
+              <label className="block text-[10px] font-black text-slate-700 uppercase tracking-wider mb-1">১. অপারেশন নির্বাচন করুন:</label>
+              <div className="flex flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={() => setBulkOpType("PRICE_INCREASE")}
+                  className={`w-full text-left px-4 py-3 rounded-xl text-xs font-black border transition-all cursor-pointer ${
+                    bulkOpType === "PRICE_INCREASE"
+                      ? "bg-indigo-600 text-white border-indigo-600 shadow-md"
+                      : "bg-white text-gray-700 border-gray-250 hover:bg-gray-50"
+                  }`}
+                >
+                  📈 শতকরা মূল্য পরিবর্তন (Percentage Price Change)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBulkOpType("CATEGORY_REASSIGN")}
+                  className={`w-full text-left px-4 py-3 rounded-xl text-xs font-black border transition-all cursor-pointer ${
+                    bulkOpType === "CATEGORY_REASSIGN"
+                      ? "bg-indigo-600 text-white border-indigo-600 shadow-md"
+                      : "bg-white text-gray-700 border-gray-250 hover:bg-gray-50"
+                  }`}
+                >
+                  📁 ক্যাটাগরি পরিবর্তন (Category Reassignment)
+                </button>
+              </div>
+            </div>
+
+            {/* Operation Parameters */}
+            <div className="md:col-span-8 bg-white p-4 rounded-xl border border-indigo-150 shadow-2xs">
+              {!bulkOpType ? (
+                <div className="py-6 text-center text-xs font-bold text-gray-400">
+                  উপরে বামে যেকোনো একটি অপারেশন সিলেক্ট করুন কাজ শুরু করতে।
+                </div>
+              ) : bulkOpType === "PRICE_INCREASE" ? (
+                <div className="space-y-4">
+                  <h4 className="text-xs font-black text-indigo-950 uppercase tracking-wide">📈 শতকরা মূল্য বৃদ্ধি / হ্রাস করুন</h4>
+                  <p className="text-[11px] text-gray-500 leading-relaxed font-semibold">
+                    সকল সিলেক্ট করা পণ্যের মূল্য একটি নির্দিষ্ট শতকরা হারে পরিবর্তন করুন। ৫% বাড়াতে চাইলে <code className="bg-indigo-50 text-indigo-700 px-1 py-0.2 rounded font-mono font-bold">5</code> এবং ৫% কমাতে চাইলে <code className="bg-red-50 text-red-700 px-1 py-0.2 rounded font-mono font-bold">-5</code> লিখুন।
+                  </p>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 mb-1">শতকরা হার লিখুন (%):</label>
+                      <input
+                        type="number"
+                        step="any"
+                        placeholder="উদাঃ ১০ বা -৫"
+                        value={bulkPricePercent}
+                        onChange={(e) => setBulkPricePercent(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-xl text-xs bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-bold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 mb-1">টার্গেট মূল্য নির্বাচন করুন:</label>
+                      <select
+                        value={bulkPriceTarget}
+                        onChange={(e) => setBulkPriceTarget(e.target.value as any)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-xl text-xs bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-bold"
+                      >
+                        <option value="PRICE">💰 শুধুমাত্র বিক্রয় মূল্য (Sale Price Only)</option>
+                        <option value="COST">🛒 শুধুমাত্র কেনার দাম (Purchase Cost Only)</option>
+                        <option value="BOTH">🔄 উভয় মূল্য (Sale Price & Cost)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end pt-2">
+                    <button
+                      type="button"
+                      onClick={handleApplyBulkOperations}
+                      disabled={isApplyingBulk || !bulkPricePercent}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-5 py-2.5 rounded-xl transition disabled:opacity-50 flex items-center gap-1.5 shadow-md cursor-pointer"
+                    >
+                      {isApplyingBulk ? "সমন্বয় করা হচ্ছে..." : "দাম আপডেট প্রয়োগ করুন (Apply Change)"}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <h4 className="text-xs font-black text-indigo-950 uppercase tracking-wide">📁 ক্যাটাগরি পুনঃনির্ধারণ (Category Reassignment)</h4>
+                  <p className="text-[11px] text-gray-500 leading-relaxed font-semibold">
+                    সকল সিলেক্ট করা পণ্যের বর্তমান ক্যাটাগরি এক ক্লিকে পরিবর্তন করুন। নিচে থেকে বিদ্যমান কোনো ক্যাটাগরি সিলেক্ট করুন অথবা নতুন নাম লিখুন।
+                  </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 mb-1">বিদ্যমান ক্যাটাগরি সমূহ:</label>
+                      <select
+                        value={bulkNewCategory}
+                        onChange={(e) => setBulkNewCategory(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-xl text-xs bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-bold"
+                      >
+                        <option value="">-- ক্যাটাগরি সিলেক্ট করুন --</option>
+                        {categories.map(c => (
+                          <option key={c} value={c}>{c}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 mb-1">অথবা নতুন ক্যাটাগরির নাম লিখুন:</label>
+                      <input
+                        type="text"
+                        placeholder="নতুন ক্যাটাগরি লিখুন"
+                        value={bulkNewCategory}
+                        onChange={(e) => setBulkNewCategory(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-xl text-xs bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-bold"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end pt-2">
+                    <button
+                      type="button"
+                      onClick={handleApplyBulkOperations}
+                      disabled={isApplyingBulk || !bulkNewCategory.trim()}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-5 py-2.5 rounded-xl transition disabled:opacity-50 flex items-center gap-1.5 shadow-md cursor-pointer"
+                    >
+                      {isApplyingBulk ? "সমন্বয় করা হচ্ছে..." : "ক্যাটাগরি আপডেট প্রয়োগ করুন (Apply Change)"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="bg-white border border-[#E9ECEF] rounded-xl overflow-x-auto">
         <table className="w-full text-left">
           <thead className="bg-[#F8F9FA] border-bottom border-[#E9ECEF]">
             <tr>
+              {role !== "sr" && (
+                <th className="pl-6 pr-2 py-4 w-12 text-center">
+                  <input 
+                    type="checkbox" 
+                    checked={isAllSelected}
+                    onChange={handleSelectAll}
+                    className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 cursor-pointer"
+                  />
+                </th>
+              )}
               <th className="px-6 py-4 font-semibold text-xs uppercase text-[#ADB5BD]">পণ্যের নাম</th>
               <th className="px-6 py-4 font-semibold text-xs uppercase text-[#ADB5BD]">ক্যাটাগরি</th>
               <th className="px-6 py-4 font-semibold text-xs uppercase text-[#ADB5BD]">মেয়াদউত্তীর্ণ তারিখ</th>
@@ -952,6 +1633,22 @@ export default function InventoryView({ products, add, update, remove, suppliers
 
               return (
               <tr key={p.id} className={isExpired ? "bg-red-50 hover:bg-red-100" : isNearingExpiry ? "bg-orange-50 hover:bg-orange-100" : "hover:bg-[#FDFDFD]"}>
+                {role !== "sr" && (
+                  <td className="pl-6 pr-2 py-4 text-center w-12">
+                    <input 
+                      type="checkbox"
+                      checked={selectedProductIds.includes(p.id)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedProductIds(prev => [...prev, p.id]);
+                        } else {
+                          setSelectedProductIds(prev => prev.filter(id => id !== p.id));
+                        }
+                      }}
+                      className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 cursor-pointer"
+                    />
+                  </td>
+                )}
                 <td className="px-6 py-4">
                   <div className="font-bold text-gray-900 flex items-center gap-2">
                     {p.name}
@@ -1161,20 +1858,22 @@ export default function InventoryView({ products, add, update, remove, suppliers
                           >
                             <Edit2 className="w-4 h-4" />
                           </button>
-                          <button 
-                            onClick={async () => {
-                              const confirmed = await confirmDelete({
+                           <button 
+                            onClick={() => {
+                              confirmDelete({
                                 title: "পণ্য ডিলিট নিশ্চিতকরণ",
-                                message: `আপনি কি নিশ্চিতভাবে "${p.name}" পণ্যটি ডিলিট করতে চান?`
-                              });
-                              if (confirmed) {
-                                try {
-                                  await remove(p.id);
-                                  toast.success("পণ্যটি সফলভাবে ডিলিট করা হয়েছে।");
-                                } catch (error: any) {
-                                  toast.error("ডিলিট করতে সমস্যা হয়েছে: " + error.message);
+                                message: `আপনি কি নিশ্চিতভাবে "${p.name}" পণ্যটি ডিলিট করতে চান?`,
+                                recordName: p.name,
+                                onConfirm: async () => {
+                                  try {
+                                    await remove(p.id);
+                                    toast.success("পণ্যটি সফলভাবে ডিলিট করা হয়েছে।");
+                                  } catch (error: any) {
+                                    toast.error("ডিলিট করতে সমস্যা হয়েছে: " + error.message);
+                                    throw error;
+                                  }
                                 }
-                              }
+                              });
                             }}
                             className="p-2 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg"
                             title="পণ্য ডিলিট করুন"
@@ -1392,6 +2091,63 @@ export default function InventoryView({ products, add, update, remove, suppliers
                     className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-5 py-2.5 rounded-xl transition disabled:opacity-50"
                   >
                     পেস্টকৃত তথ্য সংরক্ষণ করুন
+                  </button>
+                </div>
+              </div>
+
+              {/* Option 3: JSON Bulk Import / Upload */}
+              <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100">
+                <h4 className="text-sm font-extrabold text-slate-800 mb-2">৩. JSON ফাইল আপলোড বা সরাসরি পেস্ট করুন (JSON Bulk Import)</h4>
+                <p className="text-xs text-slate-500 mb-3 leading-relaxed">
+                  একটি তৈরি করা পণ্যের তালিকা JSON ফাইল (.json) আপলোড করুন অথবা নিচে JSON ফরম্যাটের ডেটা পেস্ট করুন। বিদ্যমান SKU বা নাম মিললে পণ্য আপডেট হবে এবং নতুন SKU বা নাম হলে নতুন পণ্য তৈরি হবে।
+                </p>
+                <div className="mb-4">
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">JSON ফাইল সিলেক্ট করুন:</label>
+                  <input
+                    type="file"
+                    accept=".json,application/json"
+                    onChange={handleJsonFileChange}
+                    className="block w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-750 hover:file:bg-indigo-100"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold text-slate-700">JSON ডেটা এডিট বক্সে প্রিভিউ / পেস্ট করুন:</label>
+                  <textarea
+                    value={bulkJsonText}
+                    onChange={(e) => setBulkJsonText(e.target.value)}
+                    placeholder={`[\n  {\n    "name": "Pran Mango 250ml",\n    "sku": "PRN-MJ250",\n    "category": "Beverage",\n    "stock": 120,\n    "price": 25,\n    "cost": 20,\n    "cartoonSize": 24,\n    "unit": "Pcs",\n    "supplierName": "Pran Supplier"\n  }\n]`}
+                    rows={6}
+                    className="w-full border rounded-xl p-3 text-xs bg-white focus:ring-1 focus:ring-blue-500 outline-none transition font-mono"
+                  />
+                </div>
+                <div className="mt-3 flex justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBulkJsonText(JSON.stringify([
+                        {
+                          name: "উদাহরণ পণ্য (Example Product)",
+                          sku: "EX-SKU101",
+                          category: "Beverage",
+                          stock: 100,
+                          price: 50,
+                          cost: 40,
+                          cartoonSize: 12,
+                          unit: "Pcs",
+                          supplierName: suppliers[0]?.name || "N/A"
+                        }
+                      ], null, 2));
+                    }}
+                    className="bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-xs px-4 py-2.5 rounded-xl transition"
+                  >
+                    টেমপ্লেট লোড করুন
+                  </button>
+                  <button
+                    onClick={handleJsonBulkImport}
+                    disabled={!bulkJsonText.trim()}
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-5 py-2.5 rounded-xl transition disabled:opacity-50"
+                  >
+                    JSON তথ্য ইম্পোর্ট করুন
                   </button>
                 </div>
               </div>
@@ -1769,6 +2525,148 @@ export default function InventoryView({ products, add, update, remove, suppliers
             >
               বন্ধ করুন
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* 📷 QR Replenish Simulator Modal */}
+      {showQRReplenish && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white max-w-md w-full rounded-2xl p-6 shadow-2xl animate-scale-up">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold flex items-center gap-2 text-slate-900">
+                <span>📷 কিউআর কোড স্ক্যান সিমুলেশন</span>
+              </h3>
+              <button 
+                onClick={() => setShowQRReplenish(false)} 
+                className="p-1 rounded-full hover:bg-gray-200 transition text-gray-500"
+              >
+                &times;
+              </button>
+            </div>
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4 text-xs text-amber-850 font-medium">
+              💡 পণ্য কিউআর কোড স্ক্যান করার প্রক্রিয়া সফলভাবে অনুকরণের জন্য পণ্য ও পুনরায় রিকুইজিশন সংখ্যা দিয়ে সাবমিট করুন।
+            </div>
+
+            <form onSubmit={handleSimulateQRReplenish} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">পণ্য সিলেক্ট করুন (Select Product):</label>
+                <select
+                  value={simulatedProductId}
+                  onChange={(e) => setSimulatedProductId(e.target.value)}
+                  required
+                  className="w-full border rounded-xl p-2.5 text-sm bg-white text-gray-900 focus:outline-none focus:ring-1 focus:ring-blue-500 font-bold"
+                >
+                  <option value="">-- স্ক্যানকৃত পণ্য নির্বাচন করুন --</option>
+                  {products.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} ({p.sku || "No SKU"}) [স্টক: {p.stock || 0} পিস]
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">যোগাযোগ / স্টক রিকুইজিশন পরিমাণ (Add Stock Quantity):</label>
+                <input
+                  type="number"
+                  min="1"
+                  required
+                  placeholder="যেমন: ৫০, ১০০ বা ২০০ পিস"
+                  value={simulatedQty}
+                  onChange={(e) => setSimulatedQty(e.target.value)}
+                  className="w-full border rounded-xl p-2.5 text-sm bg-white text-gray-900 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono font-bold"
+                />
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button 
+                  type="button" 
+                  onClick={() => setShowQRReplenish(false)} 
+                  disabled={isSavingSimulated}
+                  className="flex-1 border py-3 rounded-xl font-semibold hover:bg-gray-50 transition"
+                >
+                  বাতিল করুন
+                </button>
+                <button 
+                  type="submit" 
+                  disabled={isSavingSimulated || !simulatedProductId || !simulatedQty}
+                  className="flex-1 btn-primary py-3 disabled:opacity-50 font-semibold"
+                >
+                  {isSavingSimulated ? "লোডিং..." : "সিমুলেট রিকুইজিশন"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 📊 Category Min Stock Bulk Update Modal */}
+      {showMinStockModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white max-w-md w-full rounded-2xl p-6 shadow-2xl animate-scale-up">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold flex items-center gap-2 text-slate-900">
+                <span>📊 ক্যাটাগরি মিনিমাম স্টক বাল্ক আপডেট</span>
+              </h3>
+              <button 
+                onClick={() => setShowMinStockModal(false)} 
+                className="p-1 rounded-full hover:bg-gray-200 transition text-gray-500"
+              >
+                &times;
+              </button>
+            </div>
+            <div className="bg-[#EEEBFF] border border-indigo-150 rounded-xl p-3 mb-4 text-xs text-indigo-950 font-semibold">
+              💡 একটি ক্যাটাগরি সিলেক্ট করুন এবং সেই ক্যাটাগরির অন্তর্ভুক্ত সকল পণ্যের জন্য নতুন 'Minimum Stock Level' সেট করুন।
+            </div>
+
+            <form onSubmit={handleApplyMinStockCategoryBulk} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">ক্যাটাগরি নির্বাচন করুন (Select Category):</label>
+                <select
+                  value={minStockBulkCategory}
+                  onChange={(e) => setMinStockBulkCategory(e.target.value)}
+                  required
+                  className="w-full border rounded-xl p-2.5 text-sm bg-white text-gray-900 focus:outline-none focus:ring-1 focus:ring-blue-500 font-bold"
+                >
+                  <option value="">-- ক্যাটাগরি সিলেক্ট করুন --</option>
+                  {categories.map(c => (
+                    <option key={c} value={c}>📦 {c}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">সর্বনিম্ন স্টক লেভেল (Minimum Stock Level):</label>
+                <input
+                  type="number"
+                  min="0"
+                  required
+                  placeholder="যেমন: ৫, ১০ বা ১৫ পিস"
+                  value={minStockBulkLevel}
+                  onChange={(e) => setMinStockBulkLevel(e.target.value)}
+                  className="w-full border rounded-xl p-2.5 text-sm bg-white text-gray-900 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono font-bold"
+                />
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button 
+                  type="button" 
+                  onClick={() => setShowMinStockModal(false)} 
+                  disabled={isSavingMinStockBulk}
+                  className="flex-1 border py-3 rounded-xl font-semibold hover:bg-gray-50 transition"
+                >
+                  বাতিল করুন
+                </button>
+                <button 
+                  type="submit" 
+                  disabled={isSavingMinStockBulk || !minStockBulkCategory || !minStockBulkLevel}
+                  className="flex-1 btn-primary py-3 disabled:opacity-50 font-semibold"
+                >
+                  {isSavingMinStockBulk ? "লোডিং..." : "আপডেট প্রয়োগ করুন"}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

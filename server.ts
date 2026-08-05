@@ -2,6 +2,7 @@ import express from "express";
 import path from "path";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
+import fs from "fs";
 
 dotenv.config();
 
@@ -29,7 +30,7 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json());
+  app.use(express.json({ limit: "10mb" }));
 
   // API Routes
   app.get("/api/health", (req, res) => {
@@ -41,7 +42,6 @@ async function startServer() {
     console.error(JSON.stringify(req.body, null, 2));
     console.error("=================================");
     try {
-      const fs = require("fs");
       const logLine = `[${new Date().toISOString()}] ${JSON.stringify(req.body, null, 2)}\n\n`;
       fs.appendFileSync(path.join(process.cwd(), "client_errors.log"), logLine);
     } catch (err) {
@@ -106,6 +106,69 @@ Ensure the language is encouraging, professional, and directly actionable. Direc
     } catch (error: any) {
       console.error("AI Insights Error:", error);
       res.status(500).json({ error: "AI insights generation failed" });
+    }
+  });
+
+  // AI OCR Document processing (Invoice / Challan)
+  app.post("/api/ai/ocr", async (req, res) => {
+    try {
+      const { image, mimeType = "image/jpeg" } = req.body;
+      if (!image) {
+        return res.status(400).json({ error: "Image data is required" });
+      }
+
+      // Remove header if present (e.g. data:image/jpeg;base64,)
+      const base64Data = image.replace(/^data:image\/\w+;base64,/, "");
+
+      const prompt = `You are a professional DMS OCR document processor. Extract details from this Bangladeshi FMCG/distribution physical sales invoice or supplier delivery challan. 
+      Analyze the text on the document. Extract the following fields as JSON:
+      {
+        "invoiceNumber": "string or empty",
+        "date": "YYYY-MM-DD or empty",
+        "partyName": "string or empty",
+        "items": [
+          {
+            "productName": "string",
+            "quantity": number,
+            "rate": number,
+            "total": number
+          }
+        ],
+        "grandTotal": number,
+        "documentType": "invoice" | "challan" | "unknown"
+      }
+      Provide ONLY the raw JSON block. No markdown, no triple backticks, and no conversation.`;
+
+      const ai = getAIClient();
+      const response = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: {
+          parts: [
+            {
+              inlineData: {
+                mimeType: mimeType,
+                data: base64Data,
+              }
+            },
+            {
+              text: prompt
+            }
+          ]
+        },
+        config: {
+          responseMimeType: "application/json",
+        }
+      });
+
+      let jsonText = response.text || "{}";
+      // Clean up markdown block code formatting if returned
+      jsonText = jsonText.replace(/```json/g, "").replace(/```/g, "").trim();
+      
+      const parsedData = JSON.parse(jsonText);
+      res.json({ success: true, data: parsedData });
+    } catch (error: any) {
+      console.error("OCR AI Error:", error);
+      res.status(500).json({ error: "OCR processing failed", details: error.message });
     }
   });
 

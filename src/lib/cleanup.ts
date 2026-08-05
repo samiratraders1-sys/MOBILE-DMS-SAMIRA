@@ -129,3 +129,23 @@ function deleteCommonDatabases() {
     }
   });
 }
+
+/**
+ * Script utility to clear legacy Firestore collection 'delivery_route' / 'delivery_road_plan'
+ */
+export async function deleteDeliveryRouteCollection() {
+  try {
+    const { collection, getDocs, writeBatch } = await import("firebase/firestore");
+    const { db } = await import("./firebase");
+    const querySnapshot = await getDocs(collection(db, "delivery_routes"));
+    const batch = writeBatch(db);
+    querySnapshot.forEach((docSnap) => {
+      batch.delete(docSnap.ref);
+    });
+    await batch.commit();
+    console.log("Successfully deleted delivery_routes collection");
+  } catch (e) {
+    console.error("Error deleting delivery_routes collection:", e);
+  }
+}
+

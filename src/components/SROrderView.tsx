@@ -16,9 +16,25 @@ interface OrderProps {
   updateCustomer?: (id: string, customer: any) => Promise<any>;
   role?: string;
   currentUserRecord?: any;
+  ocrPreFill?: any;
+  clearOcrPreFill?: () => void;
+  onOpenScanner?: () => void;
 }
 
-export default function SROrderView({ products, customers, routes, staff, addOrder, addCustomer, updateCustomer, role, currentUserRecord }: OrderProps) {
+export default function SROrderView({ 
+  products, 
+  customers, 
+  routes, 
+  staff, 
+  addOrder, 
+  addCustomer, 
+  updateCustomer, 
+  role, 
+  currentUserRecord, 
+  ocrPreFill, 
+  clearOcrPreFill,
+  onOpenScanner
+}: OrderProps) {
   const [selectedRoute, setSelectedRoute] = useState("");
   const [selectedCustomer, setSelectedCustomer] = useState("");
   const [selectedSR, setSelectedSR] = useState("");
@@ -82,6 +98,53 @@ export default function SROrderView({ products, customers, routes, staff, addOrd
       setGeoCoords(null);
     }
   }, [selectedCustomer]);
+
+  // Hook for AI OCR scanning auto-fill
+  useEffect(() => {
+    if (ocrPreFill) {
+      if (ocrPreFill.partyName && customers.length > 0) {
+        const matched = customers.find(c => 
+          c.name.toLowerCase().includes(ocrPreFill.partyName.toLowerCase()) ||
+          (c.shopName && c.shopName.toLowerCase().includes(ocrPreFill.partyName.toLowerCase()))
+        );
+        if (matched) {
+          setSelectedCustomer(matched.id);
+          if (matched.routeId) setSelectedRoute(matched.routeId);
+        } else {
+          setSelectedCustomer(customers[0].id);
+          if (customers[0].routeId) setSelectedRoute(customers[0].routeId);
+        }
+      } else if (customers.length > 0) {
+        setSelectedCustomer(customers[0].id);
+        if (customers[0].routeId) setSelectedRoute(customers[0].routeId);
+      }
+
+      if (ocrPreFill.items && ocrPreFill.items.length > 0) {
+        const matchedCart: any[] = [];
+        ocrPreFill.items.forEach((ocrItem: any) => {
+          const prod = products.find(p => 
+            p.name.toLowerCase().includes(ocrItem.productName.toLowerCase()) ||
+            ocrItem.productName.toLowerCase().includes(p.name.toLowerCase())
+          );
+          if (prod) {
+            matchedCart.push({
+              id: prod.id,
+              name: prod.name,
+              price: prod.price || ocrItem.rate || 0,
+              qty: ocrItem.quantity,
+              piecesInCarton: prod.piecesInCarton || prod.cartoonSize || 1,
+              originalStock: prod.stock || 0
+            });
+          }
+        });
+        if (matchedCart.length > 0) {
+          setCart(matchedCart);
+        }
+      }
+      toast.success("এআই স্ক্যানিং থেকে অর্ডার এন্ট্রি ফর্মটি অটো-ফিল করা হয়েছে!");
+      if (clearOcrPreFill) clearOcrPreFill();
+    }
+  }, [ocrPreFill, customers, products]);
 
   const handleQuickAddCustomer = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -294,9 +357,21 @@ export default function SROrderView({ products, customers, routes, staff, addOrd
                 </span>
               )}
             </div>
-            <button onClick={() => window.print()} className="px-4 py-2 bg-gray-100 text-gray-600 rounded-xl font-bold text-sm border border-gray-200 hover:bg-gray-200 transition-all font-bold flex items-center gap-2">
-              <Printer className="w-4 h-4" /> প্রিন্ট
-            </button>
+            <div className="flex items-center gap-2">
+              {onOpenScanner && (
+                <button
+                  type="button"
+                  onClick={onOpenScanner}
+                  className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-100 font-extrabold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 shadow-xs transition-all active:scale-95 cursor-pointer"
+                >
+                  <Sparkles className="w-4 h-4 text-indigo-600 animate-pulse" />
+                  এআই মেমো স্ক্যান (AI Scan)
+                </button>
+              )}
+              <button onClick={() => window.print()} className="px-4 py-2 bg-gray-100 text-gray-600 rounded-xl font-bold text-sm border border-gray-200 hover:bg-gray-200 transition-all font-bold flex items-center gap-2">
+                <Printer className="w-4 h-4" /> প্রিন্ট
+              </button>
+            </div>
           </h2>
 
           <div className="hidden print:block">

@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Plus, Search, Trash2, Pencil, X } from "lucide-react";
+import { Plus, Search, Trash2, Pencil, X, Sparkles } from "lucide-react";
 import { formatCurrency } from "../lib/utils";
 import toast from "react-hot-toast";
 import { recordStockMovement } from "../lib/inventoryEngine";
@@ -15,6 +15,9 @@ interface PurchaseViewProps {
   purchases?: any[];
   removePurchase?: (id: string) => Promise<void>;
   updatePurchase?: (id: string, purchase: any) => Promise<void>;
+  ocrPreFill?: any;
+  clearOcrPreFill?: () => void;
+  onOpenScanner?: () => void;
 }
 
 export default function PurchaseView({ 
@@ -25,7 +28,10 @@ export default function PurchaseView({
   addPayment,
   purchases = [],
   removePurchase,
-  updatePurchase
+  updatePurchase,
+  ocrPreFill,
+  clearOcrPreFill,
+  onOpenScanner
 }: PurchaseViewProps) {
   const [selectedSupplier, setSelectedSupplier] = useState<string>("");
   const [items, setItems] = useState<any[]>([]);
@@ -54,6 +60,62 @@ export default function PurchaseView({
       if (saved.paidAmount !== undefined) setPaidAmount(saved.paidAmount);
     }
   );
+
+  // Hook for AI OCR scanning auto-fill
+  React.useEffect(() => {
+    if (ocrPreFill) {
+      if (ocrPreFill.invoiceNumber) setInvoiceId(ocrPreFill.invoiceNumber);
+      if (ocrPreFill.date) setDate(ocrPreFill.date);
+      
+      // Match Supplier based on partyName similarity
+      if (ocrPreFill.partyName && suppliers.length > 0) {
+        const matched = suppliers.find(s => 
+          s.name.toLowerCase().includes(ocrPreFill.partyName.toLowerCase()) ||
+          ocrPreFill.partyName.toLowerCase().includes(s.name.toLowerCase())
+        );
+        if (matched) {
+          setSelectedSupplier(matched.id);
+        } else {
+          setSelectedSupplier(suppliers[0].id);
+        }
+      } else if (suppliers.length > 0) {
+        setSelectedSupplier(suppliers[0].id);
+      }
+
+      // Convert items and match against existing products
+      if (ocrPreFill.items && ocrPreFill.items.length > 0) {
+        const matchedItems = ocrPreFill.items.map((ocrItem: any) => {
+          const prod = products.find(p => 
+            p.name.toLowerCase().includes(ocrItem.productName.toLowerCase()) ||
+            ocrItem.productName.toLowerCase().includes(p.name.toLowerCase())
+          );
+          
+          if (prod) {
+            return {
+              ...prod,
+              carton: Math.floor(ocrItem.quantity / (prod.piecesInCarton || prod.cartoonSize || 1)),
+              pieces: ocrItem.quantity % (prod.piecesInCarton || prod.cartoonSize || 1),
+              piecesInCarton: prod.piecesInCarton || prod.cartoonSize || 1,
+              purchasePrice: ocrItem.rate || prod.cost || 0
+            };
+          } else {
+            return {
+              id: "unmatched-" + Math.random().toString(36).substring(2, 9),
+              name: ocrItem.productName + " (এআই অমিল)",
+              carton: 0,
+              pieces: ocrItem.quantity,
+              piecesInCarton: 1,
+              purchasePrice: ocrItem.rate || 0
+            };
+          }
+        });
+        setItems(matchedItems);
+      }
+      
+      toast.success("এআই স্ক্যানিং থেকে ক্রয় ফর্মটি অটো-ফিল করা হয়েছে!");
+      if (clearOcrPreFill) clearOcrPreFill();
+    }
+  }, [ocrPreFill, suppliers, products]);
 
   // Edit States
   const [editingPurchase, setEditingPurchase] = useState<any | null>(null);
@@ -272,27 +334,40 @@ export default function PurchaseView({
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-bold flex items-center gap-2 flex-wrap">
-        নতুন পণ্য ক্রয়
-        {saveStatus === "saving" && (
-          <span className="text-xs font-normal text-amber-600 bg-amber-50 border border-amber-100 px-2 py-0.5 rounded-full flex items-center gap-1">
-            <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" />
-            অটো-সেভ হচ্ছে...
-          </span>
+      <div className="flex items-center justify-between flex-wrap gap-4">
+        <h2 className="text-2xl font-bold flex items-center gap-2 flex-wrap">
+          নতুন পণ্য ক্রয়
+          {saveStatus === "saving" && (
+            <span className="text-xs font-normal text-amber-600 bg-amber-50 border border-amber-100 px-2 py-0.5 rounded-full flex items-center gap-1">
+              <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" />
+              অটো-সেভ হচ্ছে...
+            </span>
+          )}
+          {saveStatus === "saved" && (
+            <span className="text-xs font-normal text-emerald-600 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-full flex items-center gap-1">
+              <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
+              অটো-সেভ সক্রিয়
+            </span>
+          )}
+          {saveStatus === "error" && (
+            <span className="text-xs font-normal text-rose-600 bg-rose-50 border border-rose-100 px-2 py-0.5 rounded-full flex items-center gap-1">
+              <span className="w-1.5 h-1.5 bg-rose-500 rounded-full" />
+              অটো-সেভ ত্রুটি
+            </span>
+          )}
+        </h2>
+
+        {onOpenScanner && (
+          <button
+            type="button"
+            onClick={onOpenScanner}
+            className="bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 text-white font-extrabold px-4.5 py-2.5 rounded-xl text-xs flex items-center gap-2 shadow-sm transition-all active:scale-95 cursor-pointer select-none"
+          >
+            <Sparkles className="w-4 h-4 text-yellow-300 animate-pulse" />
+            এআই চালান স্ক্যান (AI OCR Scan)
+          </button>
         )}
-        {saveStatus === "saved" && (
-          <span className="text-xs font-normal text-emerald-600 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-full flex items-center gap-1">
-            <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
-            অটো-সেভ সক্রিয়
-          </span>
-        )}
-        {saveStatus === "error" && (
-          <span className="text-xs font-normal text-rose-600 bg-rose-50 border border-rose-100 px-2 py-0.5 rounded-full flex items-center gap-1">
-            <span className="w-1.5 h-1.5 bg-rose-500 rounded-full" />
-            অটো-সেভ ত্রুটি
-          </span>
-        )}
-      </h2>
+      </div>
       
       <div className="bg-white p-6 rounded-2xl border flex gap-4 items-end">
         <div className="flex-1">

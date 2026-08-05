@@ -28,7 +28,8 @@ import {
   Moon,
   Layers,
   Building2,
-  Wallet
+  Wallet,
+  Camera
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { RolePermissions } from "../lib/permissions";
@@ -125,7 +126,6 @@ export default function Sidebar({ active, setActive, user, role, roles, onLogout
         { id: "settle", label: "বিকাল: হিসাব নিকেশ", icon: CheckCircle2 },
         { id: "admin-approvals", label: "ম্যানেজার পেন্ডিং হিসাব", icon: ApprovalsIcon },
         { id: "dsr-portal", label: "데일리 ডোর ডেলিভারি (DSR)", icon: TruckIcon },
-        { id: "delivery-route", label: "ডেলিভারি রুট প্ল্যান", icon: Navigation },
       ]
     },
     {
@@ -148,6 +148,7 @@ export default function Sidebar({ active, setActive, user, role, roles, onLogout
         { id: "pos", label: "নতুন বিক্রয় (POS)", icon: ShoppingCart },
         { id: "sales", label: "সেলস হিস্ট্রি", icon: FileText },
         { id: "damage-mgmt", label: "ড্যামেজ ও কোম্পানি রিটার্ন", icon: AlertTriangle },
+        { id: "scan-ocr", label: "ডকুমেন্ট স্ক্যান (OCR)", icon: Camera },
       ]
     },
     {
@@ -173,6 +174,7 @@ export default function Sidebar({ active, setActive, user, role, roles, onLogout
 
   const filterMenuItem = (item: any) => {
     if (role === 'admin') return true;
+    if (item.id === "scan-ocr") return true; // Universally available to logged-in roles
 
     // Check default precompiled fallback permissions first
     const fallbackRules = (RolePermissions as any)[role];

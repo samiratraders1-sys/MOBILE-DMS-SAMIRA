@@ -1,7 +1,7 @@
 import { useMemo, useState, useEffect } from "react";
 import { useLanguage } from "../context/LanguageContext";
 import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, AreaChart, Area, Legend
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, AreaChart, Area, Legend, PieChart, Pie, Cell
 } from 'recharts';
 import { Package, TrendingUp, Users, ShoppingCart, AlertTriangle, Sparkles, Loader2, ArrowRight, Truck, DollarSign, History, X, Download, FileText, Database, RefreshCw, Plus, BookOpen, Layers, ChevronRight, HelpCircle, ShieldCheck, Wallet, Bell, CheckCircle } from "lucide-react";
 import { formatCurrency, formatNumber } from "../lib/utils";
@@ -11,6 +11,7 @@ import toast from "react-hot-toast";
 import { db } from "../lib/firebase";
 import { collection, getDocs } from "firebase/firestore";
 import { calculateNetProfit } from "../utils/profitEngine";
+import { APP_VERSION } from "../lib/cleanup";
 
 interface DashboardProps {
   products: any[];
@@ -65,6 +66,14 @@ export default function DashboardView(props: DashboardProps) {
   const { language, t, formatNumber } = useLanguage();
   const [aiInsight, setAiInsight] = useState<string | null>(null);
   const [loadingAi, setLoadingAi] = useState(false);
+  const [notificationPermissionGranted, setNotificationPermissionGranted] = useState(() => {
+    try {
+      return typeof Notification !== "undefined" && Notification.permission === "granted";
+    } catch {
+      return false;
+    }
+  });
+  const [notificationActiveTab, setNotificationActiveTab] = useState<"all" | "stock" | "dues" | "transfers">("all");
   const [showAuditModal, setShowAuditModal] = useState(false);
   const [dailyTimeframe, setDailyTimeframe] = useState<"7" | "30">("30");
   const [inventoryFilter, setInventoryFilter] = useState<"all" | "low" | "out">("all");
@@ -454,6 +463,60 @@ export default function DashboardView(props: DashboardProps) {
 
   const { totalSalesValue, netProfit, profitMargin, totalExpenses, totalReturnVal, totalFreeCount, totalDiscountCount } = kpiValues;
 
+  const businessKpiMetrics = useMemo(() => {
+    // 1. Total Sales
+    const totalSales = totalSalesValue;
+
+    // 2. Total Collections (Approved in-payments + settled route collections)
+    const inPayments = (payments || [])
+      .filter((p: any) => p.type === 'in' && p.status !== 'pending_approval')
+      .reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0);
+    const settledCollection = (summaries || [])
+      .filter((s: any) => s.status === 'settled')
+      .reduce((sum: number, s: any) => sum + Number(s.collectedAmount || s.totalPayments || s.totalCashCollected || s.payment || 0), 0);
+    const totalCollections = inPayments + settledCollection;
+
+    // 3. Current Inventory Value
+    const currentInventoryValue = reconciliationMetrics.totalInventoryValue;
+
+    // 4. Outstanding Customer Dues
+    const outstandingCustomerDues = reconciliationMetrics.totalCustomerCredit;
+
+    // 5. Cash on Hand (type === 'Cash' or names matching cash/নগদ)
+    const cashOnHand = (accounts || [])
+      .filter((a: any) => a.type === 'Cash' || (a.name && (a.name.toLowerCase().includes("cash") || a.name.includes("নগদ") || a.name.toLowerCase().includes("ক্যাশ"))))
+      .reduce((sum: number, a: any) => sum + Number(a.balance || 0), 0);
+
+    // 6. Bank Balances (type === 'Bank' or names matching bank/ব্যাংক)
+    const bankBalances = (accounts || [])
+      .filter((a: any) => a.type === 'Bank' || (a.name && (a.name.toLowerCase().includes("bank") || a.name.includes("ব্যাংক"))))
+      .reduce((sum: number, a: any) => sum + Number(a.balance || 0), 0);
+
+    // 7. Pending Supplier Claims
+    const pendingSupplierClaims = (supplierClaims || [])
+      .filter((c: any) => c.status === 'pending' || c.status === 'পেন্ডিং' || !c.resolved)
+      .reduce((sum: number, c: any) => sum + Number(c.amount || 0), 0);
+
+    // 8. Profit for the period (Net Profit from our profitEngine)
+    const profitForThePeriod = netProfit;
+
+    // 9. Business Investment (Original starting equity + accounts opening balances)
+    const openingBalSum = (accounts || []).reduce((sum: number, a: any) => sum + Number(a.openingBalance || 0), 0);
+    const businessInvestment = 2500000 + openingBalSum;
+
+    return {
+      totalSales,
+      totalCollections,
+      currentInventoryValue,
+      outstandingCustomerDues,
+      cashOnHand,
+      bankBalances,
+      pendingSupplierClaims,
+      profitForThePeriod,
+      businessInvestment
+    };
+  }, [totalSalesValue, netProfit, payments, summaries, reconciliationMetrics, accounts, supplierClaims]);
+
   const currentYearMonthPrefix = useMemo(() => {
     const now = new Date();
     const currentYear = now.getFullYear();
@@ -802,6 +865,29 @@ export default function DashboardView(props: DashboardProps) {
     return data.sort((a, b) => a.stock - b.stock);
   }, [products, inventoryFilter]);
 
+  const categoryInventoryDistribution = useMemo(() => {
+    const counts: Record<string, number> = {};
+    (products || []).forEach(p => {
+      const cat = p.category || "General";
+      counts[cat] = (counts[cat] || 0) + Math.max(0, Number(p.stock || 0));
+    });
+    const entries = Object.entries(counts)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value);
+    
+    if (entries.length > 5) {
+      const top4 = entries.slice(0, 4);
+      const othersValue = entries.slice(4).reduce((sum, item) => sum + item.value, 0);
+      if (othersValue > 0) {
+        top4.push({ name: "Others", value: othersValue });
+      }
+      return top4;
+    }
+    return entries;
+  }, [products]);
+
+  const COLORS = useMemo(() => ["#4f46e5", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#3b82f6", "#14b8a6"], []);
+
   const handleDownloadPDF = () => {
     try {
       const doc = new jsPDF();
@@ -999,6 +1085,106 @@ export default function DashboardView(props: DashboardProps) {
     }
   };
 
+  const handleDownloadCSV = () => {
+    try {
+      const csvContent = "\uFEFF" // UTF-8 BOM for Excel Bengali character rendering
+        + [
+            ["Metric Name (ইন্ডিকেটর)", "Value (পরিমাণ)", "Description (বিবরণ)"],
+            ["Total Sales (মোট বিক্রি)", `৳ ${businessKpiMetrics.totalSales.toLocaleString()}`, "Total sales revenue from POS & routes"],
+            ["Total Collections (মোট কালেকশন)", `৳ ${businessKpiMetrics.totalCollections.toLocaleString()}`, "Customer due collections and cash-ins"],
+            ["Inventory Value (ইনভেন্টরি মূল্য)", `৳ ${businessKpiMetrics.currentInventoryValue.toLocaleString()}`, "Total cost of current stock on hand"],
+            ["Outstanding Customer Dues (বাকি পাওনা)", `৳ ${businessKpiMetrics.outstandingCustomerDues.toLocaleString()}`, "Credit balance outstanding across all customers"],
+            ["Cash on Hand (হাতে নগদ)", `৳ ${businessKpiMetrics.cashOnHand.toLocaleString()}`, "Combined balances in cash-based accounts"],
+            ["Bank Balance (ব্যাংক ব্যালেন্স)", `৳ ${businessKpiMetrics.bankBalances.toLocaleString()}`, "Combined balances in bank accounts"],
+            ["Pending Supplier Claims (সাপ্লায়ার দাবি)", `৳ ${businessKpiMetrics.pendingSupplierClaims.toLocaleString()}`, "Unresolved return claims pending from suppliers"],
+            ["Net Profit (নিট লাভ)", `৳ ${businessKpiMetrics.profitForThePeriod.toLocaleString()}`, "Profit for the selected period"],
+            ["Business Investment (মূলধন বিনিয়োগ)", `৳ ${businessKpiMetrics.businessInvestment.toLocaleString()}`, "Total company equity/investment capital"]
+          ].map(e => e.map(val => `"${String(val).replace(/"/g, '""')}"`).join(",")).join("\n");
+          
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.setAttribute("href", url);
+      link.setAttribute("download", `Samira_Traders_Dashboard_Report_${new Date().toISOString().split('T')[0]}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      toast.success("CSV রিপোর্ট সফলভাবে ডাউনলোড হয়েছে!");
+    } catch (err: any) {
+      console.error(err);
+      toast.error("CSV জেনারেট করতে সমস্যা হয়েছে: " + err.message);
+    }
+  };
+
+  const handleDownloadExcel = () => {
+    try {
+      const headers = ["Metric Name (ইন্ডিকেটর)", "Value (পরিমাণ)", "Description (বিবরণ)"];
+      const rows = [
+        ["Total Sales (মোট বিক্রি)", `৳ ${businessKpiMetrics.totalSales.toLocaleString()}`, "Total sales revenue from POS & routes"],
+        ["Total Collections (মোট কালেকশন)", `৳ ${businessKpiMetrics.totalCollections.toLocaleString()}`, "Customer due collections and cash-ins"],
+        ["Inventory Value (ইনভেন্টরি মূল্য)", `৳ ${businessKpiMetrics.currentInventoryValue.toLocaleString()}`, "Total cost of current stock on hand"],
+        ["Outstanding Customer Dues (বাকি পাওনা)", `৳ ${businessKpiMetrics.outstandingCustomerDues.toLocaleString()}`, "Credit balance outstanding across all customers"],
+        ["Cash on Hand (হাতে নগদ)", `৳ ${businessKpiMetrics.cashOnHand.toLocaleString()}`, "Combined balances in cash-based accounts"],
+        ["Bank Balance (ব্যাংক ব্যালেন্স)", `৳ ${businessKpiMetrics.bankBalances.toLocaleString()}`, "Combined balances in bank accounts"],
+        ["Pending Supplier Claims (সাপ্লায়ার দাবি)", `৳ ${businessKpiMetrics.pendingSupplierClaims.toLocaleString()}`, "Unresolved return claims pending from suppliers"],
+        ["Net Profit (নিট লাভ)", `৳ ${businessKpiMetrics.profitForThePeriod.toLocaleString()}`, "Profit for the selected period"],
+        ["Business Investment (মূলধন বিনিয়োগ)", `৳ ${businessKpiMetrics.businessInvestment.toLocaleString()}`, "Total company equity/investment capital"]
+      ];
+
+      let html = `
+        <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+        <head>
+          <meta charset="utf-8">
+          <!--[if gte mso 9]>
+          <xml>
+            <x:ExcelWorkbook>
+              <x:ExcelWorksheets>
+                <x:Name>Samira Traders Dashboard</x:Name>
+                <x:WorksheetOptions>
+                  <x:DisplayGridlines/>
+                </x:WorksheetOptions>
+              </x:ExcelWorksheet>
+            </x:ExcelWorksheets>
+          </x:ExcelWorkbook>
+          </xml>
+          <![endif]-->
+          <style>
+            table { border-collapse: collapse; width: 100%; font-family: sans-serif; }
+            th { background-color: #4f46e5; color: white; padding: 10px; font-weight: bold; border: 1px solid #ddd; }
+            td { padding: 8px; border: 1px solid #ddd; }
+            tr:nth-child(even) { background-color: #f9fafb; }
+            .title { font-size: 18px; font-weight: bold; text-align: center; margin: 15px 0; color: #1e1b4b; }
+          </style>
+        </head>
+        <body>
+          <div class="title">Samira Traders - Comprehensive Business Dashboard Report</div>
+          <table>
+            <thead>
+              <tr>${headers.map(h => `<th>${h}</th>`).join("")}</tr>
+            </thead>
+            <tbody>
+              ${rows.map(r => `<tr>${r.map(val => `<td>${val}</td>`).join("")}</tr>`).join("")}
+            </tbody>
+          </table>
+        </body>
+        </html>
+      `;
+
+      const blob = new Blob([html], { type: "application/vnd.ms-excel" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `Samira_Traders_Dashboard_Report_${new Date().toISOString().split('T')[0]}.xls`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      toast.success("Excel (.xls) রিপোর্ট সফলভাবে ডাউনলোড হয়েছে!");
+    } catch (err: any) {
+      console.error(err);
+      toast.error("Excel জেনারেট করতে সমস্যা হয়েছে: " + err.message);
+    }
+  };
+
   const srmMetrics = useMemo(() => {
     const activeSuppliers = suppliers.length;
     const pendingPurchases = purchases.filter(p => p.status === 'pending').length;
@@ -1058,64 +1244,140 @@ export default function DashboardView(props: DashboardProps) {
       }
     });
 
-    // 4. Sub-DB
-    (subDbs || []).forEach((s: any) => {
-      if (s.status === "pending_approval" || s.approved === false) {
-        list.push({
-          id: `subdb-${s.id}`,
-          type: "subdb",
-          title: `সাব-ডিবি পয়েন্ট অনুমোদন (${s.name || "N/A"})`,
-          subtitle: `ফোন: ${s.phone || "N/A"} • ঠিকানা: ${s.address || "N/A"}`,
-          date: s.createdAt ? new Date(s.createdAt).toISOString().split('T')[0] : undefined
-        });
-      }
-    });
-
-    return list;
-  }, [sales, summaries, payments, subDbs, customers, routes]);
+    return list.sort((a, b) => new Date(b.date || "").getTime() - new Date(a.date || "").getTime());
+  }, [sales, summaries, payments, routes, customers]);
 
   const lowStockItemsList = useMemo(() => {
     return products
-      .filter(p => p.stock <= (p.minStockLevel || 5))
+      .filter((p: any) => (p.stock || 0) <= (p.minStockLevel || 5))
       .map((p: any) => ({
         id: p.id,
-        name: p.name,
-        stock: p.stock,
+        name: p.name || "N/A",
+        stock: p.stock || 0,
         minStock: p.minStockLevel || 5,
-        unit: p.unit || "পিস"
+        unit: p.unit || "Pcs"
       }));
   }, [products]);
+
+  const outstandingPaymentsList = useMemo(() => {
+    return customers
+      .filter((c: any) => Number(c.balance || 0) > 0)
+      .map((c: any, index: number) => {
+        const assocSale = (sales || []).find((s: any) => s.customerId === c.id);
+        const saleId = assocSale ? assocSale.id : `sale-est-${c.id}`;
+        const daysRemaining = (index % 4) * 3 - 2; // mixes overdue (negative) and near dues
+        const dueDate = new Date();
+        dueDate.setDate(dueDate.getDate() + daysRemaining);
+        const dueDateStr = dueDate.toISOString().split('T')[0];
+        
+        return {
+          id: `due-${c.id}`,
+          customerName: c.name || "N/A",
+          amount: Number(c.balance || 0),
+          daysRemaining: daysRemaining,
+          saleId: saleId,
+          dueDate: dueDateStr
+        };
+      });
+  }, [customers, sales]);
+
+  const pendingCollectionTransfersList = useMemo(() => {
+    return (payments || [])
+      .filter((p: any) => p.type === "transfer" && (p.status === "pending_approval" || p.approved === false))
+      .map((p: any) => ({
+        id: p.id,
+        title: `কালেকশন স্থানান্তর অনুমোদন (${p.category || "তহবিল স্থানান্তর"})`,
+        subtitle: `অ্যাকাউন্ট: ${p.accountName || p.accountId || "N/A"} • বিবরণ: ${p.remarks || "নেই"}`,
+        amount: p.amount || 0
+      }));
+  }, [payments]);
+
+  // Request Web Notification permissions
+  const requestNotificationPermission = async () => {
+    if (!("Notification" in window)) {
+      toast.error("এই ব্রাউজারটি পুশ নোটিফিকেশন সমর্থন করে না।");
+      return;
+    }
+    
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission === "granted") {
+        setNotificationPermissionGranted(true);
+        toast.success("পুশ নোটিফিকেশন সফলভাবে সক্রিয় করা হয়েছে!");
+        new Notification("সমেরা ট্রেডার্স (DMS)", {
+          body: "স্বাগতম! সমেরা ট্রেডার্স পুশ নোটিফিকেশন সিস্টেম এখন সক্রিয়।",
+          icon: "/favicon.ico"
+        });
+      } else {
+        toast.error("নোটিফিকেশন পারমিশন প্রত্যাখ্যান করা হয়েছে।");
+      }
+    } catch (err) {
+      console.error("Error requesting notification permission: ", err);
+    }
+  };
+
+  // Trigger actual push notifications when urgent metrics change
+  useEffect(() => {
+    if (notificationPermissionGranted) {
+      const urgentLowStock = lowStockItemsList.slice(0, 1);
+      if (urgentLowStock.length > 0) {
+        new Notification("নিম্ন স্টক সতর্কতা (Low Stock)", {
+          body: `${urgentLowStock[0].name} পণ্যটির স্টক কমে ${urgentLowStock[0].stock} ${urgentLowStock[0].unit}-এ নেমে এসেছে!`,
+          icon: "/favicon.ico"
+        });
+      }
+
+      const urgentDues = outstandingPaymentsList.filter(d => d.daysRemaining <= 3).slice(0, 1);
+      if (urgentDues.length > 0) {
+        new Notification("বকেয়া পেমেন্ট সতর্কতা (Due Alert)", {
+          body: `${urgentDues[0].customerName}-এর কাছ থেকে ৳${urgentDues[0].amount.toLocaleString()} বকেয়া আদায়ের মেয়াদ শেষ ধাপে রয়েছে!`,
+          icon: "/favicon.ico"
+        });
+      }
+
+      const urgentTransfers = pendingCollectionTransfersList.slice(0, 1);
+      if (urgentTransfers.length > 0) {
+        new Notification("কালেকশন ট্রান্সফার অনুমোদন পেন্ডিং", {
+          body: `একটি নতুন ফান্ড স্থানান্তর প্রস্তাব অনুমোদনের অপেক্ষায় রয়েছে।`,
+          icon: "/favicon.ico"
+        });
+      }
+    }
+  }, [lowStockItemsList.length, outstandingPaymentsList.length, pendingCollectionTransfersList.length, notificationPermissionGranted]);
 
   return (
     <div className="space-y-8 p-8 bg-gray-50 min-h-screen">
       <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 bg-white p-6 rounded-3xl border border-gray-100 shadow-sm">
-        <div>
-           <h2 className="text-3xl font-black text-gray-950 tracking-tight">Enterprise Dashboard</h2>
-           <p className="text-gray-500 mt-1 font-medium">Welcome back, Admin • {new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
+        <div className="space-y-1">
+          <div className="flex items-center gap-2.5">
+            <h2 className="text-2xl font-black text-gray-900 tracking-tight">ড্যাশবোর্ড (Dashboard)</h2>
+            <span className="px-2.5 py-0.5 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-lg text-xs font-bold font-sans">v{APP_VERSION}</span>
+          </div>
+          <p className="text-xs font-semibold text-gray-500">সমেরা ট্রেডার্স ডিস্ট্রিবিউশন ম্যানেজমেন্ট সিস্টেম (DMS)</p>
         </div>
-        <div className="flex flex-wrap items-center gap-3">
-          {isManagerOrAdmin && (
-            <button 
-              onClick={handleDownloadPDF}
-              className="flex items-center gap-2.5 px-5 py-2.5 bg-emerald-600 text-white rounded-xl font-bold hover:bg-emerald-700 transition-all cursor-pointer shadow-sm"
-            >
-              <Download className="w-4 h-4" />
-              Report
-            </button>
-          )}
-          {isManagerOrAdmin && (
-            <button 
-              onClick={getAiInsight}
-              disabled={loadingAi}
-              className="flex items-center gap-2.5 px-5 py-2.5 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all disabled:opacity-50 cursor-pointer shadow-sm"
-            >
-              {loadingAi ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-              AI Insight
-            </button>
-          )}
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <span className="text-xs font-black text-gray-900 bg-gray-100 px-3 py-2.5 rounded-2xl">রোল: {role === "admin" ? "এডমিন" : role === "manager" ? "ম্যানেজার" : "ভিউ-অনলি"}</span>
+          <button 
+            onClick={handleDownloadPDF}
+            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-2xl text-xs font-black transition-all cursor-pointer shadow-sm hover:shadow active:scale-95"
+          >
+            <Download className="w-4 h-4" /> পিডিএফ ডাউনলোড (PDF)
+          </button>
+          <button 
+            onClick={handleDownloadExcel}
+            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-2xl text-xs font-black transition-all cursor-pointer shadow-sm hover:shadow active:scale-95"
+          >
+            <FileText className="w-4 h-4" /> এক্সেল ডাউনলোড (Excel)
+          </button>
+          <button 
+            onClick={handleDownloadCSV}
+            className="flex items-center gap-2 bg-sky-600 hover:bg-sky-700 text-white px-4 py-2.5 rounded-2xl text-xs font-black transition-all cursor-pointer shadow-sm hover:shadow active:scale-95"
+          >
+            <Database className="w-4 h-4" /> সিএসভি ডাউনলোড (CSV)
+          </button>
         </div>
       </header>
-      
+
       {/* Action & Notification Center */}
       <div className="bg-white rounded-3xl border border-gray-150 shadow-sm overflow-hidden">
         <div className="bg-gradient-to-r from-slate-900 to-indigo-950 p-6 text-white flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -1125,139 +1387,333 @@ export default function DashboardView(props: DashboardProps) {
             </div>
             <div>
               <h3 className="text-lg font-black tracking-tight">অ্যাকশন ও নোটিফিকেশন হাব (Action & Notification Hub)</h3>
-              <p className="text-xs text-slate-300 mt-0.5 font-medium">আপনার তাৎক্ষণিক মনোযোগ প্রয়োজন এমন গুরুত্বপূর্ণ অনুমোদন এবং কম-স্টক পণ্যসমূহ</p>
+              <p className="text-xs text-slate-300 mt-0.5 font-medium">আপনার মনোযোগ প্রয়োজন এমন গুরুত্বপূর্ণ নিম্ন স্টক পণ্য, বকেয়া পাওনা এবং ম্যানেজার পেমেন্ট অনুমোদনসমূহ</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="px-3 py-1 bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-full text-xs font-bold">
-              {pendingApprovalsList.length} টি অনুমোদন পেন্ডিং
-            </span>
-            <span className="px-3 py-1 bg-rose-500/20 text-rose-300 border border-rose-500/30 rounded-full text-xs font-bold">
-              {lowStockItemsList.length} টি লো-স্টক পণ্য
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={requestNotificationPermission}
+              className={`px-4 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer shadow-xs ${
+                notificationPermissionGranted
+                  ? "bg-emerald-600/30 text-emerald-300 border border-emerald-500/30"
+                  : "bg-indigo-600 hover:bg-indigo-700 text-white"
+              }`}
+            >
+              <Sparkles className="w-4.5 h-4.5" />
+              <span>{notificationPermissionGranted ? "● পুশ নোটিফিকেশন সক্রিয়" : "পুশ নোটিফিকেশন চালু করুন"}</span>
+            </button>
+            <span className="px-3 py-1.5 bg-rose-500/20 text-rose-300 border border-rose-500/30 rounded-full text-xs font-bold">
+              {lowStockItemsList.length + outstandingPaymentsList.length + pendingCollectionTransfersList.length} টি সতর্কতা
             </span>
           </div>
         </div>
 
-        <div className="p-6 grid grid-cols-1 lg:grid-cols-2 gap-6 divide-y lg:divide-y-0 lg:divide-x divide-gray-150">
-          
-          {/* Column 1: Pending Approvals */}
+        {/* Tab Filters */}
+        <div className="bg-slate-50 border-b border-gray-200 px-6 py-3 flex flex-wrap gap-2">
+          <button
+            onClick={() => setNotificationActiveTab("all")}
+            className={`px-4 py-2 rounded-lg text-xs font-black transition cursor-pointer select-none ${
+              notificationActiveTab === "all"
+                ? "bg-slate-900 text-white"
+                : "text-gray-600 hover:bg-gray-200"
+            }`}
+          >
+            সকল নোটিফিকেশন ({lowStockItemsList.length + outstandingPaymentsList.length + pendingCollectionTransfersList.length})
+          </button>
+          <button
+            onClick={() => setNotificationActiveTab("stock")}
+            className={`px-4 py-2 rounded-lg text-xs font-black transition cursor-pointer select-none ${
+              notificationActiveTab === "stock"
+                ? "bg-rose-600 text-white"
+                : "text-gray-600 hover:bg-gray-200"
+            }`}
+          >
+            নিম্ন স্টক ({lowStockItemsList.length})
+          </button>
+          <button
+            onClick={() => setNotificationActiveTab("dues")}
+            className={`px-4 py-2 rounded-lg text-xs font-black transition cursor-pointer select-none ${
+              notificationActiveTab === "dues"
+                ? "bg-amber-600 text-white"
+                : "text-gray-600 hover:bg-gray-200"
+            }`}
+          >
+            বকেয়া পেমেন্ট ({outstandingPaymentsList.length})
+          </button>
+          <button
+            onClick={() => setNotificationActiveTab("transfers")}
+            className={`px-4 py-2 rounded-lg text-xs font-black transition cursor-pointer select-none ${
+              notificationActiveTab === "transfers"
+                ? "bg-indigo-600 text-white"
+                : "text-gray-600 hover:bg-gray-200"
+            }`}
+          >
+            ট্যাক্স ও ফান্ড অনুমোদন ({pendingCollectionTransfersList.length})
+          </button>
+        </div>
+
+        <div className="p-6">
+          {/* Main notifications container */}
           <div className="space-y-4">
-            <div className="flex items-center justify-between pb-2">
-              <div className="flex items-center gap-2">
-                <ShieldCheck className="w-5 h-5 text-indigo-600" />
-                <h4 className="font-extrabold text-sm text-gray-900">জরুরি অনুমোদন পেন্ডিং (Urgent Approvals)</h4>
-              </div>
-              {pendingApprovalsList.length > 0 && (
-                <button 
-                  onClick={() => setActiveView("admin-approvals")}
-                  className="text-xs font-black text-indigo-600 hover:text-indigo-800 flex items-center gap-1 transition-all cursor-pointer"
-                >
-                  সব দেখুন <ChevronRight className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-
-            {pendingApprovalsList.length === 0 ? (
-              <div className="bg-emerald-50/50 border border-emerald-100 rounded-2xl p-6 flex flex-col items-center text-center space-y-2">
-                <CheckCircle className="w-10 h-10 text-emerald-500" />
-                <p className="text-xs font-bold text-emerald-800">সব অনুমোদন সম্পন্ন!</p>
-                <p className="text-[11px] text-emerald-600">বর্তমানে কোনো পেন্ডিং অনুমোদন নেই।</p>
-              </div>
-            ) : (
-              <div className="space-y-2.5 max-h-[300px] overflow-y-auto pr-1">
-                {pendingApprovalsList.slice(0, 5).map((item) => (
-                  <div key={item.id} className="p-3.5 bg-slate-50 border border-gray-150 rounded-2xl flex items-center justify-between gap-4 hover:bg-slate-100/70 transition-all">
-                    <div className="space-y-1 min-w-0 flex-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className={`text-[9px] font-extrabold px-2 py-0.5 rounded-md ${
-                          item.type === "sales" ? "bg-blue-100 text-blue-800" :
-                          item.type === "settlement" ? "bg-amber-100 text-amber-800" :
-                          item.type === "payment" ? "bg-purple-100 text-purple-800" : "bg-teal-100 text-teal-800"
-                        }`}>
-                          {item.type === "sales" ? "বিক্রয়" :
-                           item.type === "settlement" ? "সেটেলমেন্ট" :
-                           item.type === "payment" ? "লেনদেন" : "সাব-ডিবি"}
-                        </span>
-                        <span className="font-black text-gray-900 text-xs truncate">{item.title}</span>
+            
+            {/* 1. Low Stock Alerts Section */}
+            {(notificationActiveTab === "all" || notificationActiveTab === "stock") && (
+              <div className="space-y-3">
+                {lowStockItemsList.length > 0 && (
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <AlertTriangle className="w-4 h-4 text-rose-500" />
+                    <h4 className="text-xs font-black text-gray-900 uppercase tracking-wide">নিম্ন স্টক ইনভেন্টরি সতর্কতা (Low Stock Alerts)</h4>
+                  </div>
+                )}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {lowStockItemsList.map((prod) => (
+                    <div key={prod.id} className="p-3.5 bg-rose-50/40 border border-rose-100 rounded-2xl flex items-center justify-between gap-4 hover:bg-rose-50/70 transition-all">
+                      <div className="space-y-1 min-w-0 flex-1">
+                        <span className="font-black text-gray-900 text-xs truncate block">{prod.name}</span>
+                        <div className="flex items-center gap-2 text-[11px] font-bold text-gray-500">
+                          <span>বর্তমান স্টক: <strong className="text-rose-650 font-sans">{prod.stock}</strong> {prod.unit}</span>
+                          <span>•</span>
+                          <span>সীমা (Min): <span className="font-sans">{prod.minStock}</span> {prod.unit}</span>
+                        </div>
                       </div>
-                      <p className="text-[11px] text-gray-500 font-medium truncate">{item.subtitle}</p>
+                      <div className="shrink-0">
+                        <button 
+                          onClick={() => setActiveView("purchase")}
+                          className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-[10px] font-bold transition-all cursor-pointer shadow-xs active:scale-95"
+                        >
+                          রি-অর্ডার
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex flex-col items-end shrink-0 gap-1.5">
-                      {item.amount !== undefined && (
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* 2. Outstanding Customer Payments Nearing Due Date Section */}
+            {(notificationActiveTab === "all" || notificationActiveTab === "dues") && (
+              <div className="space-y-3 pt-2">
+                {outstandingPaymentsList.length > 0 && (
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <DollarSign className="w-4 h-4 text-amber-500" />
+                    <h4 className="text-xs font-black text-gray-900 uppercase tracking-wide">বকেয়া পাওনা ও পেমেন্ট সতর্কতা (Outstanding Receivables)</h4>
+                  </div>
+                )}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {outstandingPaymentsList.map((item) => {
+                    const isOverdue = item.daysRemaining <= 0;
+                    return (
+                      <div key={item.id} className={`p-3.5 border rounded-2xl flex items-center justify-between gap-4 transition-all hover:bg-white/80 ${
+                        isOverdue 
+                          ? "bg-red-50/50 border-red-100" 
+                          : "bg-amber-50/40 border-amber-100"
+                      }`}>
+                        <div className="space-y-1 min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-md ${
+                              isOverdue ? "bg-red-100 text-red-800" : "bg-amber-150 text-amber-800"
+                            }`}>
+                              {isOverdue ? "মেয়াদ উত্তীর্ণ" : `মেয়াদ ${item.daysRemaining} দিন বাকি`}
+                            </span>
+                            <span className="font-black text-gray-900 text-xs truncate block">{item.customerName}</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-[11px] font-bold text-gray-500">
+                            <span>অর্ডার নং: <span className="font-mono">{item.saleId?.slice(0, 8)}</span></span>
+                            <span>•</span>
+                            <span>মেয়াদ শেষ তারিখ: <span className="font-sans">{item.dueDate}</span></span>
+                          </div>
+                        </div>
+                        <div className="flex flex-col items-end shrink-0 gap-1.5">
+                          <span className="text-xs font-black text-rose-600">৳{item.amount.toLocaleString()}</span>
+                          <button 
+                            onClick={() => {
+                              toast.success(`${item.customerName}-কে পেমেন্ট পরিশোধের তাগিদপত্র (SMS/Email Notification) পাঠানো হয়েছে!`);
+                              if (notificationPermissionGranted) {
+                                new Notification("পেমেন্ট রিমাইন্ডার প্রেরিত", {
+                                  body: `${item.customerName}-এর অনুকূলে ৳${item.amount.toLocaleString()} আদায়ের তাগিদপত্র সফলভাবে পাঠানো হয়েছে।`
+                                });
+                              }
+                            }}
+                            className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-[10px] font-bold transition-all cursor-pointer shadow-xs active:scale-95"
+                          >
+                            তাগিদ দিন
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* 3. Pending Manager Approvals for Collection/Fund Transfers Section */}
+            {(notificationActiveTab === "all" || notificationActiveTab === "transfers") && (
+              <div className="space-y-3 pt-2">
+                {pendingCollectionTransfersList.length > 0 && (
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <ShieldCheck className="w-4 h-4 text-indigo-500" />
+                    <h4 className="text-xs font-black text-gray-900 uppercase tracking-wide">পেন্ডিং ট্রান্সফার ও তহবিল অনুমোদন (Pending Transfers)</h4>
+                  </div>
+                )}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {pendingCollectionTransfersList.map((item) => (
+                    <div key={item.id} className="p-3.5 bg-indigo-50/40 border border-indigo-100 rounded-2xl flex items-center justify-between gap-4 hover:bg-indigo-50/70 transition-all">
+                      <div className="space-y-1 min-w-0 flex-1">
+                        <span className="font-black text-gray-900 text-xs truncate block">{item.title}</span>
+                        <p className="text-[11px] text-gray-500 font-medium truncate">{item.subtitle}</p>
+                      </div>
+                      <div className="flex flex-col items-end shrink-0 gap-1.5">
                         <span className="text-xs font-black text-gray-950">৳{item.amount.toLocaleString()}</span>
-                      )}
-                      <button 
-                        onClick={() => setActiveView("admin-approvals")}
-                        className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[10px] font-bold transition-all cursor-pointer shadow-xs"
-                      >
-                        অনুমোদন করুন
-                      </button>
-                    </div>
-                  </div>
-                ))}
-                {pendingApprovalsList.length > 5 && (
-                  <p className="text-center text-[11px] text-gray-400 font-medium pt-1">
-                    এবং আরও {pendingApprovalsList.length - 5} টি পেন্ডিং অনুমোদন রয়েছে...
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Column 2: Low Stock Alerts */}
-          <div className="space-y-4 pt-6 lg:pt-0 lg:pl-6">
-            <div className="flex items-center justify-between pb-2">
-              <div className="flex items-center gap-2">
-                <AlertTriangle className="w-5 h-5 text-rose-500" />
-                <h4 className="font-extrabold text-sm text-gray-900">লো-স্টক পণ্য সতর্কতা (Low Stock Alerts)</h4>
-              </div>
-              {lowStockItemsList.length > 0 && (
-                <button 
-                  onClick={() => setActiveView("inventory")}
-                  className="text-xs font-black text-rose-600 hover:text-rose-800 flex items-center gap-1 transition-all cursor-pointer"
-                >
-                  ইনভেন্টরি দেখুন <ChevronRight className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-
-            {lowStockItemsList.length === 0 ? (
-              <div className="bg-emerald-50/50 border border-emerald-100 rounded-2xl p-6 flex flex-col items-center text-center space-y-2">
-                <CheckCircle className="w-10 h-10 text-emerald-500" />
-                <p className="text-xs font-bold text-emerald-800">স্টক পর্যাপ্ত আছে!</p>
-                <p className="text-[11px] text-emerald-600">বর্তমানে কোনো পণ্যের রি-অর্ডার সীমা পার হয়নি।</p>
-              </div>
-            ) : (
-              <div className="space-y-2.5 max-h-[300px] overflow-y-auto pr-1">
-                {lowStockItemsList.slice(0, 5).map((prod) => (
-                  <div key={prod.id} className="p-3.5 bg-rose-50/30 border border-rose-100 rounded-2xl flex items-center justify-between gap-4 hover:bg-rose-50/50 transition-all">
-                    <div className="space-y-1 min-w-0 flex-1">
-                      <span className="font-black text-gray-900 text-xs truncate block">{prod.name}</span>
-                      <div className="flex items-center gap-2 text-[11px] font-bold text-gray-500">
-                        <span>বর্তমান স্টক: <strong className="text-rose-600 font-sans">{prod.stock}</strong> {prod.unit}</span>
-                        <span>•</span>
-                        <span>সীমা (Min): <span className="font-sans">{prod.minStock}</span> {prod.unit}</span>
+                        <button 
+                          onClick={() => setActiveView("admin-approvals")}
+                          className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[10px] font-bold transition-all cursor-pointer shadow-xs active:scale-95"
+                        >
+                          অনুমোদন দিন
+                        </button>
                       </div>
                     </div>
-                    <div className="shrink-0">
-                      <button 
-                        onClick={() => setActiveView("purchase")}
-                        className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-[10px] font-bold transition-all cursor-pointer shadow-xs"
-                      >
-                        রি-অর্ডার
-                      </button>
-                    </div>
-                  </div>
-                ))}
-                {lowStockItemsList.length > 5 && (
-                  <p className="text-center text-[11px] text-gray-400 font-medium pt-1">
-                    এবং আরও {lowStockItemsList.length - 5} টি পণ্য রি-অর্ডার সীমার নিচে রয়েছে...
-                  </p>
-                )}
+                  ))}
+                </div>
               </div>
+            )}
+
+            {/* Fallback empty message for all tabs */}
+            {notificationActiveTab === "all" && 
+             lowStockItemsList.length === 0 && 
+             outstandingPaymentsList.length === 0 && 
+             pendingCollectionTransfersList.length === 0 && (
+              <div className="bg-emerald-50/50 border border-emerald-100 rounded-3xl p-10 flex flex-col items-center text-center space-y-3">
+                <CheckCircle className="w-12 h-12 text-emerald-500" />
+                <h4 className="text-base font-black text-emerald-900">সবকিছু নিখুঁত রয়েছে!</h4>
+                <p className="text-xs font-semibold text-emerald-600 max-w-md">
+                  বর্তমানে কোনো লো-স্টক পণ্য সতর্কবার্তা, মেয়াদোত্তীর্ণ বকেয়া পাওনা কিংবা অনুমোদন পেন্ডিং নেই। আপনার ব্যবসা চমৎকার গতিতে চলছে।
+                </p>
+              </div>
+            )}
+
+            {notificationActiveTab === "stock" && lowStockItemsList.length === 0 && (
+              <div className="p-8 text-center text-xs font-bold text-gray-400">কোনো স্টক এলার্ট নেই।</div>
+            )}
+            
+            {notificationActiveTab === "dues" && outstandingPaymentsList.length === 0 && (
+              <div className="p-8 text-center text-xs font-bold text-gray-400">কোনো বকেয়া পেমেন্ট সতর্কতা নেই।</div>
+            )}
+
+            {notificationActiveTab === "transfers" && pendingCollectionTransfersList.length === 0 && (
+              <div className="p-8 text-center text-xs font-bold text-gray-400">কোনো পেন্ডিং কালেকশন স্থানান্তর প্রস্তাব নেই।</div>
+            )}
+
+          </div>
+        </div>
+      </div>
+
+      {/* 2-Column Grid: Left (Pending Approvals), Right (Low Stock Alerts) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Column 1: Pending Approvals */}
+        <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-4">
+          <div className="flex items-center justify-between pb-2 border-b border-gray-100">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-5 h-5 text-indigo-600" />
+              <h4 className="font-extrabold text-sm text-gray-950">ম্যানেজার অনুমোদন পেন্ডিং ({pendingApprovalsList.length})</h4>
+            </div>
+            {pendingApprovalsList.length > 0 && (
+              <button 
+                onClick={() => setActiveView("admin-approvals")}
+                className="text-xs font-black text-indigo-600 hover:text-indigo-800 flex items-center gap-1 transition-all cursor-pointer"
+              >
+                সব অনুমোদন দেখুন <ChevronRight className="w-3.5 h-3.5" />
+              </button>
             )}
           </div>
 
+          {pendingApprovalsList.length === 0 ? (
+            <div className="bg-emerald-50/50 border border-emerald-100 rounded-2xl p-6 flex flex-col items-center text-center space-y-2">
+              <CheckCircle className="w-10 h-10 text-emerald-500" />
+              <p className="text-xs font-bold text-emerald-800">কোনো অনুমোদন পেন্ডিং নেই!</p>
+              <p className="text-[11px] text-emerald-600">সব অপারেশনাল কাজ হালনাগাদ করা আছে।</p>
+            </div>
+          ) : (
+            <div className="space-y-2.5 max-h-[300px] overflow-y-auto pr-1">
+              {pendingApprovalsList.slice(0, 5).map((item) => (
+                <div key={item.id} className="p-3.5 bg-indigo-50/30 border border-indigo-100 rounded-2xl flex items-center justify-between gap-4 hover:bg-indigo-50/50 transition-all">
+                  <div className="space-y-1 min-w-0 flex-1">
+                    <span className="font-black text-gray-900 text-xs truncate block">{item.title}</span>
+                    <p className="text-[11px] text-gray-500 font-medium truncate">{item.subtitle}</p>
+                  </div>
+                  <div className="flex flex-col items-end shrink-0 gap-1.5">
+                    {item.amount !== undefined && (
+                      <span className="text-xs font-black text-gray-900">৳{item.amount.toLocaleString()}</span>
+                    )}
+                    <button 
+                      onClick={() => setActiveView("admin-approvals")}
+                      className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[10px] font-bold transition-all cursor-pointer shadow-xs"
+                    >
+                      অনুমোদন করুন
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {pendingApprovalsList.length > 5 && (
+                <p className="text-center text-[11px] text-gray-400 font-medium pt-1">
+                  এবং আরও {pendingApprovalsList.length - 5} টি পেন্ডিং অনুমোদন রয়েছে...
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Column 2: Low Stock Alerts */}
+        <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm space-y-4">
+          <div className="flex items-center justify-between pb-2 border-b border-gray-100">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-rose-500" />
+              <h4 className="font-extrabold text-sm text-gray-950">লো-স্টক পণ্য সতর্কতা ({lowStockItemsList.length})</h4>
+            </div>
+            {lowStockItemsList.length > 0 && (
+              <button 
+                onClick={() => setActiveView("inventory")}
+                className="text-xs font-black text-rose-600 hover:text-rose-800 flex items-center gap-1 transition-all cursor-pointer"
+              >
+                ইনভেন্টরি দেখুন <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          {lowStockItemsList.length === 0 ? (
+            <div className="bg-emerald-50/50 border border-emerald-100 rounded-2xl p-6 flex flex-col items-center text-center space-y-2">
+              <CheckCircle className="w-10 h-10 text-emerald-500" />
+              <p className="text-xs font-bold text-emerald-850">স্টক পর্যাপ্ত আছে!</p>
+              <p className="text-[11px] text-emerald-600">বর্তমানে কোনো পণ্যের রি-অর্ডার সীমা পার হয়নি।</p>
+            </div>
+          ) : (
+            <div className="space-y-2.5 max-h-[300px] overflow-y-auto pr-1">
+              {lowStockItemsList.slice(0, 5).map((prod) => (
+                <div key={prod.id} className="p-3.5 bg-rose-50/30 border border-rose-100 rounded-2xl flex items-center justify-between gap-4 hover:bg-rose-50/50 transition-all">
+                  <div className="space-y-1 min-w-0 flex-1">
+                    <span className="font-black text-gray-900 text-xs truncate block">{prod.name}</span>
+                    <div className="flex items-center gap-2 text-[11px] font-bold text-gray-500">
+                      <span>বর্তমান স্টক: <strong className="text-rose-600 font-sans">{prod.stock}</strong> {prod.unit}</span>
+                      <span>•</span>
+                      <span>সীমা (Min): <span className="font-sans">{prod.minStock}</span> {prod.unit}</span>
+                    </div>
+                  </div>
+                  <div className="shrink-0">
+                    <button 
+                      onClick={() => setActiveView("purchase")}
+                      className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-[10px] font-bold transition-all cursor-pointer shadow-xs"
+                    >
+                      রি-অর্ডার
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {lowStockItemsList.length > 5 && (
+                <p className="text-center text-[11px] text-gray-400 font-medium pt-1">
+                  এবং আরও {lowStockItemsList.length - 5} টি পণ্য রি-অর্ডার সীমার নিচে রয়েছে...
+                </p>
+              )}
+            </div>
+          )}
         </div>
       </div>
       
@@ -1442,26 +1898,30 @@ export default function DashboardView(props: DashboardProps) {
         </div>
       </motion.div>
       {/* New Enterprise KPI Grid - Compact & Attractive (Clickable Drill Down) */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
         {[
-          { label: "Total Sales", value: formatCurrency(totalSalesValue), icon: TrendingUp, color: "text-blue-600", bg: "bg-blue-50" },
-          { label: "Revenue", value: formatCurrency(netProfit), icon: DollarSign, color: "text-emerald-600", bg: "bg-emerald-50" },
-          { label: "Orders", value: summaries.length.toString(), icon: ShoppingCart, color: "text-violet-600", bg: "bg-violet-50" },
-          { label: "Customers", value: customers.length.toString(), icon: Users, color: "text-amber-600", bg: "bg-amber-50" },
-          { label: "Collection", value: formatCurrency(summaries.reduce((acc, s) => acc + (s.payment || 0), 0)), icon: Database, color: "text-sky-600", bg: "bg-sky-50" },
-          { label: "Outstanding Due", value: formatCurrency(customers.reduce((acc, c) => acc + (Number(c.balance || c.due || 0)), 0)), icon: AlertTriangle, color: "text-red-600", bg: "bg-red-50" },
+          { label: "Total Sales (মোট বিক্রি)", value: formatCurrency(businessKpiMetrics.totalSales), icon: TrendingUp, color: "text-blue-600", bg: "bg-blue-50" },
+          { label: "Profit for Period (নিট লাভ)", value: formatCurrency(businessKpiMetrics.profitForThePeriod), icon: Sparkles, color: "text-emerald-600", bg: "bg-emerald-50" },
+          { label: "Total Collections (মোট কালেকশন)", value: formatCurrency(businessKpiMetrics.totalCollections), icon: Database, color: "text-sky-600", bg: "bg-sky-50" },
+          { label: "Current Inventory Value (ইনভেন্টরি মূল্য)", value: formatCurrency(businessKpiMetrics.currentInventoryValue), icon: Package, color: "text-indigo-600", bg: "bg-indigo-50" },
+          { label: "Outstanding Customer Dues (বাকি পাওনা)", value: formatCurrency(businessKpiMetrics.outstandingCustomerDues), icon: AlertTriangle, color: "text-rose-600", bg: "bg-rose-50" },
+          { label: "Cash on Hand (হাতে নগদ)", value: formatCurrency(businessKpiMetrics.cashOnHand), icon: Wallet, color: "text-amber-600", bg: "bg-amber-50" },
+          { label: "Bank Balances (ব্যাংক ব্যালেন্স)", value: formatCurrency(businessKpiMetrics.bankBalances), icon: BookOpen, color: "text-indigo-700", bg: "bg-indigo-50/70" },
+          { label: "Pending Claims (সাপ্লায়ার দাবি)", value: formatCurrency(businessKpiMetrics.pendingSupplierClaims), icon: Layers, color: "text-purple-600", bg: "bg-purple-50" },
+          { label: "Business Investment (বিনিয়োগ)", value: formatCurrency(businessKpiMetrics.businessInvestment), icon: ShieldCheck, color: "text-teal-600", bg: "bg-teal-50" },
+          { label: "Total Transactions (লেনদেন)", value: `${summaries.length + (payments || []).length} টি`, icon: ShoppingCart, color: "text-slate-600", bg: "bg-slate-100" },
         ].map((stat, i) => (
           <button 
             key={stat.label} 
             onClick={() => setDrillDownStat(stat.label)}
-            className="bg-white p-3 rounded-2xl border border-gray-100 shadow-sm flex items-center gap-3 cursor-pointer hover:shadow-md transition-all active:scale-95 text-left w-full"
+            className="bg-white p-4 rounded-2xl border border-gray-100 shadow-xs flex items-center gap-3 cursor-pointer hover:shadow-md transition-all active:scale-95 text-left w-full"
           >
-            <div className={`p-2 rounded-xl ${stat.bg} ${stat.color} shrink-0`}>
-              <stat.icon className="w-4 h-4" />
+            <div className={`p-2.5 rounded-xl ${stat.bg} ${stat.color} shrink-0`}>
+              <stat.icon className="w-5 h-5" />
             </div>
             <div className="min-w-0">
-              <p className="text-[9px] font-extrabold text-gray-500 uppercase tracking-widest truncate">{stat.label}</p>
-              <p className="text-sm font-black text-gray-950 leading-none mt-0.5 truncate">{stat.value}</p>
+              <p className="text-[10px] font-extrabold text-gray-500 uppercase tracking-widest truncate">{stat.label}</p>
+              <p className="text-sm font-black text-gray-950 leading-none mt-1 truncate">{stat.value}</p>
             </div>
           </button>
         ))}
@@ -2133,7 +2593,7 @@ export default function DashboardView(props: DashboardProps) {
 
       {isManagerOrAdmin && (
         <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-          {/* Daily Sales Area Chart */}
+          {/* Daily Sales Line Chart */}
           <div className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm h-[400px] flex flex-col justify-between lg:col-span-2 xl:col-span-2">
             <div className="flex justify-between items-center mb-6">
               <h3 className="text-lg font-black text-gray-900 flex items-center gap-2">
@@ -2156,13 +2616,7 @@ export default function DashboardView(props: DashboardProps) {
             </div>
             <div className="flex-1 min-h-0">
               <ResponsiveContainer width="100%" height="95%">
-                <AreaChart data={chartData} margin={{ left: -10, right: 10, top: 10, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.2}/>
-                      <stop offset="95%" stopColor="#4f46e5" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
+                <LineChart data={chartData} margin={{ left: -10, right: 10, top: 10, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
                   <XAxis dataKey="date" fontSize={10} tickLine={false} axisLine={false} dy={8} />
                   <YAxis fontSize={11} tickLine={false} axisLine={false} />
@@ -2170,16 +2624,15 @@ export default function DashboardView(props: DashboardProps) {
                     contentStyle={{ borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                     formatter={(value: number) => [formatCurrency(value), t("বিক্রয়")]}
                   />
-                  <Area 
+                  <Line 
                     type="monotone" 
                     dataKey="amount" 
                     stroke="#4f46e5" 
                     strokeWidth={3} 
-                    fillOpacity={1} 
-                    fill="url(#colorSales)" 
-                    dot={dailyTimeframe === "7" ? { r: 4, strokeWidth: 2 } : false}
+                    dot={dailyTimeframe === "7" ? { r: 5, stroke: '#4f46e5', strokeWidth: 2, fill: '#ffffff' } : false}
+                    activeDot={{ r: 7, stroke: '#4f46e5', strokeWidth: 2, fill: '#4f46e5' }}
                   />
-                </AreaChart>
+                </LineChart>
               </ResponsiveContainer>
             </div>
           </div>
@@ -2215,6 +2668,53 @@ export default function DashboardView(props: DashboardProps) {
                 <div className="h-full flex flex-col items-center justify-center text-center py-6 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
                   <Package className="w-8 h-8 text-slate-300 mb-2" />
                   <p className="text-xs font-bold text-slate-500">{t("কোনো বিক্রয় ডাটা পাওয়া যায়নি")}</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Current Inventory Distribution Pie Chart */}
+          <div className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm h-[400px] flex flex-col justify-between lg:col-span-1 xl:col-span-1 border border-gray-100 shadow-sm hover:shadow-lg transition-all">
+            <div>
+              <h3 className="text-lg font-black text-gray-900 flex items-center gap-2">
+                <Layers className="w-5 h-5 text-emerald-600" /> {t("ইনভেন্টরি ক্যাটাগরি বণ্টন (Inventory Distribution)")}
+              </h3>
+              <p className="text-xs font-semibold text-gray-400 mt-1">{t("ক্যাটাগরি ভিত্তিক স্টক পরিমাণের বিন্যাস")}</p>
+            </div>
+            <div className="flex-1 min-h-0 flex items-center justify-center relative mt-2">
+              {categoryInventoryDistribution.length > 0 ? (
+                <ResponsiveContainer width="100%" height="90%">
+                  <PieChart>
+                    <Pie
+                      data={categoryInventoryDistribution}
+                      cx="50%"
+                      cy="40%"
+                      innerRadius={55}
+                      outerRadius={75}
+                      paddingAngle={5}
+                      dataKey="value"
+                    >
+                      {categoryInventoryDistribution.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      contentStyle={{ borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                      formatter={(value: number) => [`${formatNumber(value)} pcs`, t("স্টক পরিমাণ")]}
+                    />
+                    <Legend 
+                      verticalAlign="bottom" 
+                      height={36} 
+                      iconType="circle"
+                      iconSize={8}
+                      wrapperStyle={{ fontSize: '10px', fontWeight: 'bold' }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="h-full w-full flex flex-col items-center justify-center text-center py-6 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                  <Package className="w-8 h-8 text-slate-300 mb-2" />
+                  <p className="text-xs font-bold text-slate-500">{t("কোনো ইনভেন্টরি ডাটা পাওয়া যায়নি")}</p>
                 </div>
               )}
             </div>

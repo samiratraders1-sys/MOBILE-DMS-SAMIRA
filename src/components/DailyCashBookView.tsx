@@ -22,7 +22,7 @@ import {
 import { jsPDF } from "jspdf";
 import { formatCurrency } from "../lib/utils";
 import { 
-  ResponsiveContainer, 
+  ResponsiveContainer,
   AreaChart, 
   Area, 
   XAxis, 

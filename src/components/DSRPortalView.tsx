@@ -265,9 +265,43 @@ export default function DSRPortalView({
     toast.success("ক্যাশ আদায় এন্ট্রি যোগ হয়েছে");
   };
 
+  const getCurrentLocation = (): Promise<{ lat: number; lng: number }> => {
+    return new Promise((resolve) => {
+      if (typeof navigator === "undefined" || !navigator.geolocation) {
+        // Fallback simulated location in Dhaka
+        resolve({
+          lat: 23.8103 + (Math.random() - 0.5) * 0.04,
+          lng: 90.4125 + (Math.random() - 0.5) * 0.04
+        });
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          resolve({
+            lat: position.coords.latitude,
+            lng: position.coords.longitude
+          });
+        },
+        (error) => {
+          console.warn("Geolocation failed or denied, using fallback coordinates:", error);
+          resolve({
+            lat: 23.8103 + (Math.random() - 0.5) * 0.04,
+            lng: 90.4125 + (Math.random() - 0.5) * 0.04
+          });
+        },
+        { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+      );
+    });
+  };
+
   const handleSubmitDraft = async () => {
     if (!activeSummary || !calculations) return;
     try {
+      const locationToast = toast.loading("ডিএসআর অবস্থান নির্ধারণ করা হচ্ছে...");
+      const coords = await getCurrentLocation();
+      toast.dismiss(locationToast);
+
       // Build damageItems array from damageQtys dictionary
       const constructedDamageItems = Object.entries(damageQtys)
         .filter(([_, qty]) => Number(qty) > 0)
@@ -296,6 +330,7 @@ export default function DSRPortalView({
         status: "pending_approval",
         approved: false,
         settlementDate: new Date().toISOString().split('T')[0],
+        settlementLocation: coords,
         items: calculations.items.map((item: any) => ({
           productId: item.productId,
           productName: item.productName || "",
@@ -425,7 +460,7 @@ export default function DSRPortalView({
         </div>
       )}
 
-      <DSRPortalMap orders={orders} />
+      <DSRPortalMap orders={orders} summaries={summaries} staff={staff} />
 
       {/* Sales Target Progress */}
       {activeSummary && (

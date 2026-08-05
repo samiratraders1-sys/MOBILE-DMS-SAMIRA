@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from "react";
-import { Plus, ShoppingBasket, Search, Trash2, Printer, CheckCircle, RotateCcw, AlertTriangle, UserCheck, Loader2 } from "lucide-react";
+import { Plus, ShoppingBasket, Search, Trash2, Printer, CheckCircle, RotateCcw, AlertTriangle, UserCheck, Loader2, QrCode } from "lucide-react";
 import { recordStockMovement } from "../lib/inventoryEngine";
 import { MovementType } from "../lib/stockMovement";
 import { formatCurrency } from "../lib/utils";
@@ -8,6 +8,7 @@ import { useConfirm } from "../context/ConfirmContext";
 import toast from "react-hot-toast";
 import ThermalPrintTemplate from "./ThermalPrintTemplate";
 import VoiceInputButton from "./VoiceInputButton";
+import QRScannerModal from "./QRScannerModal";
 
 interface POSProps {
   products: any[];
@@ -66,10 +67,34 @@ export default function PointOfSaleView({
   const [cart, setCart] = useState<CartItem[]>([]);
   const { confirmDelete } = useConfirm();
   const [productSearch, setProductSearch] = useState("");
+  const [showScanner, setShowScanner] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState("");
   const [customCashName, setCustomCashName] = useState("");
   const [selectedRoute, setSelectedRoute] = useState("");
   const [receivedAmount, setReceivedAmount] = useState("");
+
+  const handleBarcodeScanned = (decodedText: string) => {
+    const code = decodedText.trim();
+    if (!code) return;
+
+    // Search for a product that matches the scanned barcode
+    const matched = products.find(p => 
+      p.id === code || 
+      p.name.toLowerCase() === code.toLowerCase() ||
+      (p.sku && p.sku.toLowerCase() === code.toLowerCase())
+    ) || products.find(p => 
+      p.name.toLowerCase().includes(code.toLowerCase()) ||
+      (p.sku && p.sku.toLowerCase().includes(code.toLowerCase()))
+    );
+
+    if (matched) {
+      toast.success(`পণ্য পাওয়া গেছেঃ "${matched.name}"`);
+      openProductEntryModal(matched);
+    } else {
+      setProductSearch(code);
+      toast.error(`"${code}" কোড দিয়ে কোনো পণ্য সরাসরি পাওয়া যায়নি। সার্চ ফিল্টারে যুক্ত করা হয়েছে।`);
+    }
+  };
 
   // Auto-save form values to IndexedDB
   const formStateToSave = React.useMemo(() => ({
@@ -745,7 +770,15 @@ export default function PointOfSaleView({
               onChange={(e) => setProductSearch(e.target.value)}
               className="w-full pl-10 pr-24 border rounded-xl p-2.5 text-sm font-medium focus:ring-2 focus:ring-black outline-none bg-gray-50 focus:bg-white transition-all"
             />
-            <div className="absolute right-2 top-1.5 flex items-center z-10 bg-inherit rounded-r-xl">
+            <div className="absolute right-2 top-1.5 flex items-center gap-1 z-10 bg-inherit rounded-r-xl">
+              <button
+                type="button"
+                onClick={() => setShowScanner(true)}
+                className="p-1.5 hover:bg-slate-100 rounded-xl transition text-indigo-600 hover:text-indigo-800"
+                title="বারকোড স্ক্যান করুন (Scan Barcode)"
+              >
+                <QrCode className="w-4 h-4" />
+              </button>
               <VoiceInputButton 
                 onTranscript={(text) => setProductSearch(text)} 
                 placeholderName="পণ্য"
@@ -1341,6 +1374,19 @@ export default function PointOfSaleView({
           </div>
         </div>
       )}
+
+      {/* Product Barcode Scanner Modal */}
+      <QRScannerModal
+        isOpen={showScanner}
+        onClose={() => setShowScanner(false)}
+        onScan={handleBarcodeScanned}
+        title="পণ্য বারকোড স্ক্যানার (POS Product Scan)"
+        placeholderText="পণ্য আইডি বা বারকোড কোড লিখুন"
+        exampleCodes={products.slice(0, 5).map(p => ({
+          code: p.id || "",
+          label: `${p.name} (স্টক: ${p.stock || 0})`
+        }))}
+      />
     </div>
   );
 }

@@ -3,16 +3,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { onAuthStateChanged, signOut, User } from "firebase/auth";
 import { auth, db } from "./lib/firebase";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { toast, Toaster } from "react-hot-toast";
-import { Menu, X, LayoutDashboard, Package, FileText, ShoppingCart, Users, Truck, LogIn, Wifi, WifiOff, Smartphone, Plus, Trash2, Loader2, Sparkles, DollarSign, Wallet, ShoppingBag, Keyboard, ShieldCheck } from "lucide-react";
+import { Menu, X, LayoutDashboard, Package, FileText, ShoppingCart, Users, Truck, LogIn, Wifi, WifiOff, Smartphone, Plus, Trash2, Loader2, Sparkles, DollarSign, Wallet, ShoppingBag, Keyboard, ShieldCheck, Camera, Check, Search, MoreVertical, ChevronDown } from "lucide-react";
 import { snapshotAll } from "./lib/snapshot";
 import { useLanguage } from "./context/LanguageContext";
 import { performAppStorageCleanup, APP_VERSION } from "./lib/cleanup";
 import { calculateLedger, checkTransactionDrift } from "./utils/ledgerCalculator";
+import { recordStockMovement } from "./lib/inventoryEngine";
 
 
 import Sidebar from "./components/Sidebar";
@@ -52,15 +53,19 @@ import DamageView from "./components/DamageView";
 import AdvancedOpsView from "./components/AdvancedOpsView";
 import DMSEnterpriseView from "./components/DMSEnterpriseView";
 import EnterpriseSuitesView from "./components/EnterpriseSuitesView";
-import DeliveryRouteView from "./components/DeliveryRouteView";
 import SuperAdminView from "./components/SuperAdminView";
+import ReportsPage from "./pages/Reports";
+import OrderManagementPage from "./pages/OrderManagement";
+import { handleCompleteSale } from "./services/salesService";
 import ExpenseLedgerView from "./components/ExpenseLedgerView";
 import SupplierClaimsView from "./components/SupplierClaimsView";
 import CustomerCollectionModule from "./components/CustomerCollectionModule";
 import AuditComplianceView from "./components/AuditComplianceView";
+import DocumentScannerModal from "./components/DocumentScannerModal";
 
 import { useCollection } from "./hooks/useCollection";
 import { RolePermissions } from "./lib/permissions";
+import { applyThemePalette } from "./lib/theme";
 
 export default function App() {
   const { language, setLanguage, t, formatNumber } = useLanguage();
@@ -68,6 +73,9 @@ export default function App() {
   // Run IndexedDB and localStorage cache/schema cleanup on app mount
   useEffect(() => {
     performAppStorageCleanup();
+    // Load and apply brand color palette from localStorage on startup
+    const savedPalette = localStorage.getItem("brand-palette") || "default";
+    applyThemePalette(savedPalette);
   }, []);
 
   // Global Tactile Haptic Feedback and Ripple Effect
@@ -118,6 +126,7 @@ export default function App() {
     };
 
     window.addEventListener("mousedown", handleGlobalClick);
+    toast.success("Cleanup Complete. App Optimized");
     return () => window.removeEventListener("mousedown", handleGlobalClick);
   }, []);
 
@@ -229,6 +238,11 @@ export default function App() {
   const [activeQuickAction, setActiveQuickAction] = useState<"sale" | "purchase" | "expense" | null>(null);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
+  const [mobileQuickActionsOpen, setMobileQuickActionsOpen] = useState(false);
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+  const [mobileMoreMenuOpen, setMobileMoreMenuOpen] = useState(false);
+  const [ocrPreFill, setOcrPreFill] = useState<any | null>(null);
+  const [isOcrModalOpen, setIsOcrModalOpen] = useState(false);
 
   // Sync activeView with browser history for graceful PWA & Android hardware Back button behavior
   useEffect(() => {
@@ -437,7 +451,7 @@ export default function App() {
 
   // Wrapped transaction helper methods to ensure real-time consistency
   const addPaymentWithTx = async (payRecord: any) => {
-    const payId = await payments.add(payRecord);
+    const payId = await rawPaymentsAddRef.current(payRecord);
     if (payId) {
       const isCust = customers.data.some((c: any) => c.id === payRecord.entityId);
       const isSupp = suppliers.data.some((s: any) => s.id === payRecord.entityId);
@@ -465,12 +479,12 @@ export default function App() {
   };
 
   const removePaymentWithTx = async (payId: string) => {
-    await payments.remove(payId);
+    await rawPaymentsRemoveRef.current(payId);
     await transactions.remove(payId);
   };
 
   const addSaleWithTx = async (saleRecord: any) => {
-    const saleId = await sales.add(saleRecord);
+    const saleId = await rawSalesAddRef.current(saleRecord);
     if (saleId) {
       const supplierTotals: Record<string, number> = {};
       (saleRecord.items || []).forEach((item: any) => {
@@ -521,7 +535,7 @@ export default function App() {
   };
 
   const addReturnWithTx = async (retRecord: any) => {
-    const retId = await returns.add(retRecord);
+    const retId = await rawReturnsAddRef.current(retRecord);
     if (retId) {
       const p = products.data.find((prod: any) => prod.id === retRecord.productId);
       const sId = p?.supplierId || "all";
@@ -541,6 +555,24 @@ export default function App() {
     }
     return retId;
   };
+
+  // Store raw collection methods before overriding to prevent recursion in wrapped helper methods
+  const rawSalesAddRef = useRef(sales.add);
+  if (sales.add && !(sales.add as any).__isWrapper) rawSalesAddRef.current = sales.add;
+
+  const rawPaymentsAddRef = useRef(payments.add);
+  if (payments.add && !(payments.add as any).__isWrapper) rawPaymentsAddRef.current = payments.add;
+
+  const rawPaymentsRemoveRef = useRef(payments.remove);
+  if (payments.remove && !(payments.remove as any).__isWrapper) rawPaymentsRemoveRef.current = payments.remove;
+
+  const rawReturnsAddRef = useRef(returns.add);
+  if (returns.add && !(returns.add as any).__isWrapper) rawReturnsAddRef.current = returns.add;
+
+  (addSaleWithTx as any).__isWrapper = true;
+  (addPaymentWithTx as any).__isWrapper = true;
+  (removePaymentWithTx as any).__isWrapper = true;
+  (addReturnWithTx as any).__isWrapper = true;
 
   // Assign the overrides to prevent drift and integrate transactions
   customers.data = enrichedCustomers;
@@ -594,6 +626,26 @@ export default function App() {
     purchases.data,
     transactions.data
   ]);
+
+  const syncingSettlementsRef = useRef<Set<string>>(new Set());
+
+  // Self-healing: Automatically ensure all settled settlements hit sales, cash & expense ledgers
+  useEffect(() => {
+    if (loading || summaries.loading || sales.loading || payments.loading) return;
+    const unSyncedSettled = (summaries.data || []).filter(
+      (s: any) => (s.status === "settled" || s.approved === true) &&
+                  !(sales.data || []).some((sale: any) => sale.refId === s.id) &&
+                  !syncingSettlementsRef.current.has(s.id)
+    );
+    if (unSyncedSettled.length > 0) {
+      unSyncedSettled.forEach((summ: any) => {
+        syncingSettlementsRef.current.add(summ.id);
+        onApproveSettlement(summ.id, true).catch(err => {
+          console.error("Settlement auto-sync error:", err);
+        });
+      });
+    }
+  }, [loading, summaries.loading, sales.loading, payments.loading, summaries.data, sales.data]);
 
   const logAdminActivity = async (actionType: string, details: string) => {
     try {
@@ -713,104 +765,308 @@ export default function App() {
     } catch (e) {}
   };
 
-  const onApproveSettlement = async (summaryId: string) => {
+  const onApproveSettlement = async (summaryId: string, forceSync = false) => {
     const summ = summaries.data.find(s => s.id === summaryId);
-    if (!summ || summ.approved || summ.status === "settled") return;
+    if (!summ) return;
 
-    // 1. Returns update
+    // Check if already completely synced (unless forceSync is requested)
+    if (!forceSync && summ.approved && summ.status === "settled") {
+      const hasSales = (sales.data || []).some((s: any) => s.refId === summaryId);
+      if (hasSales) return;
+    }
+
+    if (syncingSettlementsRef.current.has(summaryId) && !forceSync) return;
+    syncingSettlementsRef.current.add(summaryId);
+
+    const settlementDate = summ.settlementDate || summ.date || new Date().toISOString().split('T')[0];
+    const routeObj = routes.data.find((r: any) => r.id === summ.routeId);
+    const dsrObj = staff.data.find((st: any) => st.id === summ.dsrId);
+
+    // Idempotency check: don't duplicate main sale if it already exists
+    const existingSales = (sales.data || []).filter((s: any) => s.refId === summaryId);
+    const hasMainSale = existingSales.some((s: any) => s.type === "dsr_settlement");
+
+    // 1. Returns update to warehouse product stock
     for (const item of summ.items || []) {
-      const p = products.data.find(prod => prod.id === item.productId);
-      if (p && item.returns > 0) {
-        await products.update(p.id, {
-          stock: (p.stock || 0) + Number(item.returns)
-        });
+      const p = products.data.find((prod: any) => prod.id === item.productId);
+      const returnQty = Number(item.returns || 0);
+      if (p && returnQty > 0) {
+        if (!summ.approved) {
+          await products.update(p.id, {
+            stock: (p.stock || 0) + returnQty
+          });
+        }
+        await recordStockMovement(p.id, 'RETURN', returnQty, summaryId);
       }
     }
 
-    // 2. Damage items logged to damageInventory
-    for (const d of summ.damageItems || []) {
-      const p = products.data.find(prod => prod.id === d.productId);
-      await damageInventory.add({
-        productId: d.productId,
-        supplierId: p?.supplierId || "unknown",
-        quantity: d.quantity,
-        price: d.price || p?.price || 0,
-        date: new Date().toISOString().split('T')[0]
-      });
+    // 2. Main Route Sales Invoice & Ledger Hit (if not already created)
+    const soldItems = (summ.items || []).filter((item: any) => {
+      const soldQty = item.soldQty !== undefined ? Number(item.soldQty) : (Number(item.totalPieces || 0) - Number(item.returns || 0));
+      return soldQty > 0;
+    });
+
+    const calculatedSalesVal = soldItems.reduce((acc: number, item: any) => {
+      const soldQty = item.soldQty !== undefined ? Number(item.soldQty) : (Number(item.totalPieces || 0) - Number(item.returns || 0));
+      return acc + (Number(item.saleValue) || (soldQty * Number(item.price || 0)));
+    }, 0);
+
+    const totalSalesValue = Number(summ.salesValue) || calculatedSalesVal;
+
+    if (!hasMainSale && totalSalesValue > 0) {
+      const saleRecord = {
+        date: settlementDate,
+        customerId: summ.routeId ? `route_${summ.routeId}` : "dsr_route_sales",
+        customerName: `রুট বিক্রয় (${routeObj?.name || summ.route || "বিকেলের লোডশিট"}) - SR: ${dsrObj?.name || summ.srName || "DSR"}`,
+        routeId: summ.routeId || "",
+        dsrId: summ.dsrId || "",
+        items: soldItems.map((item: any) => {
+          const p = products.data.find((prod: any) => prod.id === item.productId);
+          const soldCount = item.soldQty !== undefined ? Number(item.soldQty) : (Number(item.totalPieces || 0) - Number(item.returns || 0));
+          return {
+            productId: item.productId,
+            productName: item.productName || p?.name || "Product",
+            totalPieces: soldCount,
+            cartonSize: p?.piecesInCarton || 1,
+            price: Number(item.price || p?.price || 0),
+            total: Number(item.saleValue) || (soldCount * Number(item.price || p?.price || 0))
+          };
+        }),
+        total: totalSalesValue,
+        paidAmount: Number(summ.totalPayments || 0),
+        dueAmount: Number(summ.totalCredits || 0),
+        discount: Number(summ.totalDiscountValue || 0),
+        status: "approved",
+        approved: true,
+        type: "dsr_settlement",
+        refId: summaryId,
+        createdAt: new Date().toISOString()
+      };
+
+      await sales.add(saleRecord);
     }
 
-    // 3. Customer credits (dues) increase their ledger outstanding balance
+    // 3. Customer Credits (Due cards / বাকিতে বিক্রি)
     for (const credit of summ.credits || []) {
-      const cust = customers.data.find(c => c.id === credit.customerId);
-      if (cust) {
-        await customers.update(cust.id, {
-          balance: (cust.balance || 0) + Number(credit.amount)
+      if (credit.customerId && Number(credit.amount) > 0) {
+        const cust = customers.data.find((c: any) => c.id === credit.customerId);
+        if (cust) {
+          const hasCustCreditSale = (sales.data || []).some((s: any) => s.refId === summaryId && s.customerId === cust.id && s.type === "customer_due_settlement");
+          if (!hasCustCreditSale) {
+            if (!summ.approved) {
+              await customers.update(cust.id, {
+                balance: (Number(cust.balance) || 0) + Number(credit.amount)
+              });
+            }
+            await sales.add({
+              date: settlementDate,
+              customerId: cust.id,
+              customerName: cust.name,
+              items: [],
+              total: Number(credit.amount),
+              paidAmount: 0,
+              dueAmount: Number(credit.amount),
+              status: "approved",
+              approved: true,
+              type: "customer_due_settlement",
+              note: `কাস্টমার বকেয়া বিক্রয় - বিকেলের সেটেলমেন্ট (মেমো/রুট: ${routeObj?.name || "N/A"}, DSR: ${dsrObj?.name || "N/A"})`,
+              refId: summaryId,
+              createdAt: new Date().toISOString()
+            });
+          }
+        }
+      }
+    }
+
+    // 4. Free / Gift Product Outflow
+    const totalFreeVal = Number(summ.totalFreeValue) || (summ.freeItems || []).reduce((acc: number, f: any) => {
+      const p = products.data.find((x: any) => x.id === f.productId);
+      return acc + (Number(f.quantity || 0) * Number(p?.price || 0));
+    }, 0);
+
+    for (const f of summ.freeItems || []) {
+      if (f.productId && Number(f.quantity) > 0) {
+        await recordStockMovement(f.productId, 'FREE', -Number(f.quantity), summaryId);
+      }
+    }
+
+    if (totalFreeVal > 0) {
+      const hasFreeExp = (expenses.data || []).some((e: any) => e.refId === summaryId && e.category === "ফ্রি ও উপহার সামগ্রী বিতরণ");
+      if (!hasFreeExp) {
+        await expenses.add({
+          date: settlementDate,
+          amount: totalFreeVal,
+          source: "DSR",
+          category: "ফ্রি ও উপহার সামগ্রী বিতরণ",
+          description: `ফ্রি ও উপহার প্রোডাক্ট বিতরণ খরচ - রুট: ${routeObj?.name || "N/A"} (${dsrObj?.name || "DSR"})`,
+          refId: summaryId,
+          status: "approved",
+          approved: true,
+          createdAt: new Date().toISOString()
         });
       }
     }
 
-    // 3.5. Discrepancy (short) handling: flag short as Manager Salary Advances and Recoverable Debt
-    const shortVal = Number(summ.dsrBalance || 0);
+    // 5. Special Cash Discounts
+    const totalDiscVal = Number(summ.totalDiscountValue) || (summ.discountItems || []).reduce((acc: number, d: any) => acc + Number(d.amount || 0), 0);
+    if (totalDiscVal > 0) {
+      const hasDiscExp = (expenses.data || []).some((e: any) => e.refId === summaryId && e.category === "স্পেশাল ক্যাশ ডিসকাউন্ট");
+      if (!hasDiscExp) {
+        await expenses.add({
+          date: settlementDate,
+          amount: totalDiscVal,
+          source: "DSR",
+          category: "স্পেশাল ক্যাশ ডিসকাউন্ট",
+          description: `স্পেশাল ক্যাশ ছাড়/ডিসকাউন্ট - রুট: ${routeObj?.name || "N/A"} (${dsrObj?.name || "DSR"})`,
+          refId: summaryId,
+          status: "approved",
+          approved: true,
+          createdAt: new Date().toISOString()
+        });
+      }
+    }
+
+    // 6. Damage Returns
+    const totalDamVal = Number(summ.totalDamageValue) || (summ.damageItems || []).reduce((acc: number, d: any) => acc + (Number(d.quantity || 0) * Number(d.price || 0)), 0);
+    for (const d of summ.damageItems || []) {
+      if (d.productId && Number(d.quantity) > 0) {
+        const p = products.data.find((prod: any) => prod.id === d.productId);
+        await damageInventory.add({
+          productId: d.productId,
+          supplierId: p?.supplierId || "unknown",
+          quantity: Number(d.quantity),
+          price: Number(d.price || p?.price || 0),
+          date: settlementDate,
+          createdAt: new Date().toISOString()
+        });
+        await recordStockMovement(d.productId, 'DAMAGE', -Number(d.quantity), summaryId);
+      }
+    }
+
+    if (totalDamVal > 0) {
+      const hasDamExp = (expenses.data || []).some((e: any) => e.refId === summaryId && e.category === "নষ্ট ও ড্যামেজ পণ্য ফেরত");
+      if (!hasDamExp) {
+        await expenses.add({
+          date: settlementDate,
+          amount: totalDamVal,
+          source: "DSR",
+          category: "নষ্ট ও ড্যামেজ পণ্য ফেরত",
+          description: `নষ্ট ও ড্যামেজ পণ্য ক্ষতি - রুট: ${routeObj?.name || "N/A"} (${dsrObj?.name || "DSR"})`,
+          refId: summaryId,
+          status: "approved",
+          approved: true,
+          createdAt: new Date().toISOString()
+        });
+      }
+    }
+
+    // 7. Route Expenses
+    for (const e of summ.expenses || []) {
+      if (Number(e.amount) > 0) {
+        const hasRouteExp = (expenses.data || []).some((ex: any) => ex.refId === summaryId && ex.category === (e.type || "বিকেলের রুট খরচ") && Number(ex.amount) === Number(e.amount));
+        if (!hasRouteExp) {
+          await expenses.add({
+            date: settlementDate,
+            amount: Number(e.amount),
+            source: "DSR",
+            category: e.type || "বিকেলের রুট খরচ",
+            description: `DSR রুট খরচ (${e.type || "বিবিধ"}) - SR: ${dsrObj?.name || "DSR"} (বিল #${summaryId.slice(-4).toUpperCase()})`,
+            refId: summaryId,
+            status: "approved",
+            approved: true,
+            createdAt: new Date().toISOString()
+          });
+        }
+      }
+    }
+
+    // 8. Cash Collection into Cash Account
+    const totalPaymentsVal = Number(summ.totalPayments) || (summ.payments || []).reduce((acc: number, p: any) => acc + Number(p.amount || 0), 0);
+    if (totalPaymentsVal > 0) {
+      const hasCashPay = (payments.data || []).some((p: any) => p.refId === summaryId && p.category === "DSR Route Sales Collection");
+      if (!hasCashPay) {
+        await payments.add({
+          date: settlementDate,
+          type: "in",
+          amount: totalPaymentsVal,
+          category: "DSR Route Sales Collection",
+          description: `বিকেলের রুট সেলস ক্যাশ কালেকশন (DSR: ${dsrObj?.name || "DSR"}, রুট: ${routeObj?.name || "N/A"})`,
+          entityId: summ.dsrId || "cash",
+          method: "Cash",
+          accountId: "cash",
+          status: "approved",
+          approved: true,
+          createdBy: "System",
+          createdAt: new Date().toISOString(),
+          refId: summaryId
+        });
+      }
+    }
+
+    // 9. Discrepancy (Short) handling
+    const shortVal = Number(summ.dsrBalance !== undefined ? summ.dsrBalance : 0);
     if (shortVal < 0) {
       const shortAmount = Math.abs(shortVal);
-      const dsrObj = staff.data.find(s => s.id === summ.dsrId);
       if (dsrObj) {
-        const basicSalary = Number(dsrObj.salary || dsrObj.Salary || 12000);
-        const advanceAmount = Math.min(shortAmount, basicSalary);
-        const debtAmount = shortAmount > basicSalary ? shortAmount - basicSalary : 0;
+        const hasShortPay = (payments.data || []).some((p: any) => p.refId === summaryId && (p.category === "Manager Salary Advance" || p.category === "Recoverable Debt"));
+        if (!hasShortPay) {
+          const basicSalary = Number(dsrObj.salary || dsrObj.Salary || 12000);
+          const advanceAmount = Math.min(shortAmount, basicSalary);
+          const debtAmount = shortAmount > basicSalary ? shortAmount - basicSalary : 0;
 
-        if (advanceAmount > 0) {
-          await payments.add({
-            date: summ.settlementDate || summ.date || new Date().toISOString().split('T')[0],
-            type: "out",
-            amount: advanceAmount,
-            category: "Manager Salary Advance",
-            description: `হিসাবের শর্ট সমন্বয় ও অগ্রিম বেতন (Short Balance Salary Advance) - রুট বিল #${summ.id.slice(-4).toUpperCase()}`,
-            entityId: summ.dsrId,
-            method: "Adjustment",
-            accountId: "cash",
-            status: "approved",
-            approved: true,
-            createdBy: "System",
-            createdAt: new Date().toISOString(),
-            refId: summ.id
-          });
+          if (advanceAmount > 0) {
+            await payments.add({
+              date: settlementDate,
+              type: "out",
+              amount: advanceAmount,
+              category: "Manager Salary Advance",
+              description: `হিসাবের শর্ট সমন্বয় ও অগ্রিম বেতন (Short Balance Salary Advance) - রুট বিল #${summaryId.slice(-4).toUpperCase()}`,
+              entityId: summ.dsrId,
+              method: "Adjustment",
+              accountId: "cash",
+              status: "approved",
+              approved: true,
+              createdBy: "System",
+              createdAt: new Date().toISOString(),
+              refId: summaryId
+            });
+          }
+
+          if (debtAmount > 0) {
+            await payments.add({
+              date: settlementDate,
+              type: "out",
+              amount: debtAmount,
+              category: "Recoverable Debt",
+              description: `অতিরিক্ত শর্ট রিকভারেবল ডেট (Recoverable Debt - Short exceeds Salary) - রুট বিল #${summaryId.slice(-4).toUpperCase()}`,
+              entityId: summ.dsrId,
+              method: "Adjustment",
+              accountId: "cash",
+              status: "approved",
+              approved: true,
+              createdBy: "System",
+              createdAt: new Date().toISOString(),
+              refId: summaryId
+            });
+          }
+
+          if (!summ.approved) {
+            await staff.update(dsrObj.id, {
+              balance: (Number(dsrObj.balance) || 0) - shortAmount
+            });
+          }
         }
-
-        if (debtAmount > 0) {
-          await payments.add({
-            date: summ.settlementDate || summ.date || new Date().toISOString().split('T')[0],
-            type: "out",
-            amount: debtAmount,
-            category: "Recoverable Debt",
-            description: `অতিরিক্ত শর্ট রিকভারেবল ডেট (Recoverable Debt - Short exceeds Salary) - রুট বিল #${summ.id.slice(-4).toUpperCase()}`,
-            entityId: summ.dsrId,
-            method: "Adjustment",
-            accountId: "cash",
-            status: "approved",
-            approved: true,
-            createdBy: "System",
-            createdAt: new Date().toISOString(),
-            refId: summ.id
-          });
-        }
-
-        // Subtract from staff balance (debt increases on company's assets / they owe us)
-        await staff.update(dsrObj.id, {
-          balance: (Number(dsrObj.balance) || 0) - shortAmount
-        });
       }
     }
 
-    // 4. Update Summary record status to settled and approved
+    // 10. Mark Summary as settled & approved
     await summaries.update(summaryId, {
       status: "settled",
       approved: true
     });
 
     try {
-      const dsr = staff.data.find(st => st.id === summ.dsrId);
-      await logAdminActivity("approve_settlement", `ডিএসআর বিকাল হিসাব (সেটেলমেন্ট) অনুমোদন করা হয়েছে: স্টাফ '${dsr?.name || "N/A"}' (মোট বিক্রয়: ${summ.salesValue || 0} ৳, ID: ${summaryId})`);
+      await logAdminActivity("approve_settlement", `ডিএসআর বিকাল হিসাব (সেটেলমেন্ট) অনুমোদন ও লেজার সিঙ্ক সম্পন্ন: স্টাফ '${dsrObj?.name || "N/A"}' (মোট বিক্রয়: ${totalSalesValue} ৳, ID: ${summaryId})`);
     } catch (e) {}
   };
 
@@ -1012,7 +1268,20 @@ export default function App() {
     }
   };
 
-  const currentUserRecord = users.data.find(u => u.email === user?.email);
+  let currentUserRecord = users.data.find(u => u.email === user?.email);
+  if (!currentUserRecord && user?.email) {
+    try {
+      const saved = localStorage.getItem(`user_record_${user.email}`);
+      if (saved) {
+        currentUserRecord = JSON.parse(saved);
+      } else {
+        const localUsers = JSON.parse(localStorage.getItem("local_users") || "[]");
+        currentUserRecord = localUsers.find((u: any) => u.email === user.email);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }
   console.log("DEBUG App.tsx users.data:", users.data);
   console.log("DEBUG App.tsx currentUser:", user);
   console.log("DEBUG App.tsx currentUserRecord:", currentUserRecord);
@@ -1043,7 +1312,9 @@ export default function App() {
         return (
           <OrderManagementView
             orders={orders.data}
+            addOrder={orders.add}
             updateOrder={orders.update}
+            deleteOrder={orders.remove}
             products={products.data}
             customers={customers.data}
           />
@@ -1111,9 +1382,13 @@ export default function App() {
         return <SuperAdminView />;
       case "delivery-route":
         return (
-          <DeliveryRouteView
-            orders={orders.data}
+          <ReportsPage
+            sales={sales.data}
             customers={customers.data}
+            transactions={transactions.data}
+            damageInventory={damageInventory.data}
+            expenses={expenses.data}
+            products={products.data}
           />
         );
       case "inventory":
@@ -1155,6 +1430,9 @@ export default function App() {
             updateCustomer={customers.update}
             role={role}
             currentUserRecord={currentUserRecord}
+            ocrPreFill={ocrPreFill}
+            clearOcrPreFill={() => setOcrPreFill(null)}
+            onOpenScanner={() => setIsOcrModalOpen(true)}
           />
         );
       case "sr-order-list":
@@ -1189,6 +1467,99 @@ export default function App() {
              updateProduct={products.update}
           />
         );
+      case "scan-ocr":
+        return (
+          <div className="p-6 max-w-5xl mx-auto space-y-6">
+            <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <h2 className="text-xl font-black text-slate-900 flex items-center gap-2">
+                  <Sparkles className="w-5.5 h-5.5 text-indigo-600 animate-pulse" />
+                  এআই চালিত ডকুমেন্ট স্ক্যানার (DMS OCR)
+                </h2>
+                <p className="text-sm text-slate-500">আপনার মেমো, ভাউচার বা চালান স্ক্যান করে সরাসরি সিস্টেমে ক্রয় বা বিক্রয় রেকর্ড এন্ট্রি করুন।</p>
+              </div>
+              <button 
+                onClick={() => setIsOcrModalOpen(true)}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold px-5 py-3 rounded-xl text-xs flex items-center gap-2 shadow-md hover:shadow transition-all active:scale-95 cursor-pointer"
+              >
+                <Camera className="w-4.5 h-4.5" /> নতুন স্ক্যান শুরু করুন (Start Scan)
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              
+              {/* Manual instruction steps */}
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 space-y-4 md:col-span-1">
+                <h3 className="text-sm font-black text-slate-800">কার্যপ্রণালী (How to Use)</h3>
+                <div className="space-y-3 text-xs leading-normal">
+                  <div className="flex gap-2.5">
+                    <span className="w-5 h-5 bg-indigo-100 text-indigo-700 font-extrabold rounded-full flex items-center justify-center shrink-0">১</span>
+                    <p className="text-slate-600"><strong className="text-slate-800">ক্যামেরা বা ফাইল আপলোড:</strong> উপরের বোতামটি চেপে সরাসরি ফোনের ক্যামেরা দিয়ে ছবি তুলুন অথবা গ্যালারি থেকে ভাউচার ফাইলটি আপলোড করুন।</p>
+                  </div>
+                  <div className="flex gap-2.5">
+                    <span className="w-5 h-5 bg-indigo-100 text-indigo-700 font-extrabold rounded-full flex items-center justify-center shrink-0">২</span>
+                    <p className="text-slate-600"><strong className="text-slate-800">এআই এনালাইসিস:</strong> "Process OCR" বোতাম চাপলে গুগল জেমিনি এআই আপনার ছবি থেকে সব তথ্য (মেমো নম্বর, তারিখ, পণ্যের তালিকা, রেট এবং মোট বিল) স্বয়ংক্রিয়ভাবে বের করবে।</p>
+                  </div>
+                  <div className="flex gap-2.5">
+                    <span className="w-5 h-5 bg-indigo-100 text-indigo-700 font-extrabold rounded-full flex items-center justify-center shrink-0">৩</span>
+                    <p className="text-slate-600"><strong className="text-slate-800">সরাসরি ডেটা ইমপোর্ট:</strong> সংগৃহীত ডেটা যাচাই করে এক ক্লিকে সরাসরি "ক্রয় বিল" বা "অর্ডার এন্ট্রি (Sales)" হিসেবে সিস্টেমে ইম্পোর্ট করুন। কোনো ডুপ্লিকেট এন্ট্রি করতে হবে না!</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Status / Active prefill card */}
+              <div className="bg-white border border-slate-150 rounded-2xl p-5 space-y-4 md:col-span-2 flex flex-col justify-between">
+                <div>
+                  <h3 className="text-sm font-black text-slate-800 border-b pb-2 mb-3">সরাসরি ইম্পোর্ট ডেটা স্ট্যাটাস (Import Queue)</h3>
+                  
+                  {ocrPreFill ? (
+                    <div className="space-y-4 text-xs">
+                      <div className="bg-amber-50 border border-amber-200 p-3.5 rounded-xl flex items-start gap-3">
+                        <Check className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                        <div>
+                          <h4 className="font-bold text-amber-900">ইম্পোর্টের জন্য প্রস্তুত ডেটা পাওয়া গেছে!</h4>
+                          <p className="text-amber-700 mt-1">মেমো আইডি: <strong className="font-sans">#{ocrPreFill.invoiceNumber || "N/A"}</strong> | প্রতিষ্ঠান: {ocrPreFill.partyName || "N/A"}</p>
+                          <p className="text-amber-700 mt-0.5">মোট লাইনের সংখ্যা: {ocrPreFill.items?.length || 0} টি পণ্য | নিট বিল: <strong className="font-sans">{ocrPreFill.grandTotal} ৳</strong></p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <button 
+                          onClick={() => {
+                            setActiveView("purchase");
+                            toast.success("ক্রয় এন্ট্রি মডিউলে রিডাইরেক্ট করা হচ্ছে...");
+                          }}
+                          className="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold px-4 py-2.5 rounded-xl flex-1 text-center cursor-pointer"
+                        >
+                          ক্রয় এন্ট্রিতে ইম্পোর্ট করুন (Import to Purchase)
+                        </button>
+                        <button 
+                          onClick={() => {
+                            setActiveView("orders");
+                            toast.success("অর্ডার এন্ট্রি মডিউলে রিডাইরেক্ট করা হচ্ছে...");
+                          }}
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold px-4 py-2.5 rounded-xl flex-1 text-center cursor-pointer"
+                        >
+                          অর্ডার এন্ট্রিতে ইম্পোর্ট করুন (Import to Sales Order)
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-slate-400 flex flex-col items-center justify-center space-y-2">
+                      <FileText className="w-10 h-10 text-slate-300" />
+                      <p className="text-xs">ইম্পোর্ট কিউ ফাঁকা আছে। নতুন কোনো মেমো স্ক্যান করা হয়নি।</p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="bg-slate-50 p-3 rounded-xl border border-slate-150 text-[11px] text-slate-500 leading-normal">
+                  💡 <strong className="text-slate-700">টিপস:</strong> ডিস্ট্রিবিউটর হাউসের এসআররা দোকানে গিয়ে মেমো বা চালানের ছবি তুলে এক ক্লিকেই সম্পূর্ণ অর্ডার এন্ট্রি পূরণ করে সাবমিট করতে পারেন!
+                </div>
+              </div>
+
+            </div>
+          </div>
+        );
       case "purchase":
         return (
           <PurchaseView 
@@ -1200,6 +1571,9 @@ export default function App() {
             purchases={purchases.data}
             removePurchase={purchases.remove}
             updatePurchase={purchases.update}
+            ocrPreFill={ocrPreFill}
+            clearOcrPreFill={() => setOcrPreFill(null)}
+            onOpenScanner={() => setIsOcrModalOpen(true)}
           />
         );
       case "settle":
@@ -1215,6 +1589,7 @@ export default function App() {
             updateProduct={products.update}
             role={role}
             addExpense={async (e) => { await expenses.add(e); }}
+            onApproveSettlement={onApproveSettlement}
           />
         );
       case "dsr-portal":
@@ -1573,6 +1948,7 @@ export default function App() {
         if (role !== 'admin') return <AccessDeniedView />;
         return (
           <SettingsView 
+            role={role}
             categories={categories.data} 
             incomeCategories={incomeCategories.data}
             addIncomeCategory={async (data) => { await incomeCategories.add(data); }}
@@ -1670,187 +2046,354 @@ export default function App() {
       </div>
       
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="sticky top-0 z-45 flex justify-between items-center gap-4 flex-wrap bg-[#F8F9FA]/90 backdrop-blur-md py-4 px-4 lg:px-8 border-b border-gray-200/30">
-          <div className="flex items-center gap-4">
-            <button 
-              onClick={() => setSidebarOpen(true)}
-              className="lg:hidden p-2 bg-white rounded-xl border shadow-sm"
-            >
-              <Menu className="w-6 h-6" />
-            </button>
-            <div className="flex flex-col">
-              <h1 className="text-lg lg:text-3xl font-black font-sans tracking-tighter">SAMIRA BMS v1.0</h1>
-              <p className="text-[10px] lg:text-xs text-[#ADB5BD] uppercase font-bold tracking-widest leading-none">{t("Powered by Samira Traders")}</p>
-            </div>
-            {/* Quick Action Buttons Next to Brand */}
-            <div className="flex items-center gap-1.5 ml-2 md:ml-4 flex-wrap">
+        <header className="sticky top-0 z-45 bg-[#F8F9FA]/95 backdrop-blur-md border-b border-gray-200/50 shadow-2xs">
+          {/* Header main bar - Single row, fixed height on mobile, no multi-line wrapping */}
+          <div className="flex justify-between items-center gap-2 px-3 py-2.5 md:py-3.5 md:px-6 lg:px-8 max-w-[1920px] mx-auto">
+            
+            {/* Left: Brand & Sidebar toggle */}
+            <div className="flex items-center gap-2 sm:gap-3 shrink-0">
               <button 
-                onClick={() => setActiveView("loadsheet")}
-                className="px-2.5 py-1.5 bg-sky-50 text-sky-700 hover:bg-sky-100 border border-sky-100 rounded-lg text-[10px] md:text-xs font-black flex items-center gap-1 transition-all shadow-2xs select-none active:scale-95 cursor-pointer"
-                title="Morning Load Sheet (সকাল: লোডশিট)"
+                onClick={() => setSidebarOpen(true)}
+                className="lg:hidden p-2 bg-white rounded-xl border border-gray-200/80 shadow-xs active:scale-95 transition-transform"
+                aria-label="Open menu"
               >
-                <span className="w-1.5 h-1.5 rounded-full bg-sky-500 animate-pulse shrink-0"></span>
-                <span>Morning Load Sheet (সকাল: লোডশিট)</span>
+                <Menu className="w-5 h-5 text-gray-700" />
               </button>
-              <button 
-                onClick={() => setActiveView("settle")}
-                className="px-2.5 py-1.5 bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-100 rounded-lg text-[10px] md:text-xs font-black flex items-center gap-1 transition-all shadow-2xs select-none active:scale-95 cursor-pointer"
-                title="Afternoon Load Sheet (বিকাল: হিসাব নিকেশ)"
-              >
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse shrink-0"></span>
-                <span>Afternoon Load Sheet (বিকাল: হিসাব নিকেশ)</span>
-              </button>
-              <button 
-                onClick={() => setActiveView("subdb")}
-                className="px-2.5 py-1.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-100 rounded-lg text-[10px] md:text-xs font-black flex items-center gap-1 transition-all shadow-2xs select-none active:scale-95 cursor-pointer"
-                title="DUe Collection (Customer dual collection)"
-              >
-                <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse shrink-0"></span>
-                <span>DUe Collection (Customer dual collection)</span>
-              </button>
-            </div>
-          </div>
+              <div className="flex flex-col">
+                <h1 className="text-base sm:text-lg lg:text-2xl font-black font-sans tracking-tight leading-tight text-slate-900 flex items-center gap-1.5">
+                  <span>SAMIRA BMS</span>
+                  <span className="text-[10px] sm:text-xs font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded-md border border-indigo-100">v1.0</span>
+                </h1>
+                <p className="hidden sm:block text-[9px] lg:text-[10px] text-slate-400 uppercase font-bold tracking-widest leading-none">
+                  {t("Powered by Samira Traders")}
+                </p>
+              </div>
 
-          <div className="flex-1 max-w-md mx-2 md:mx-4">
-            <GlobalSearchHeader 
-              products={products.data}
-              customers={customers.data}
-              sales={sales.data}
-              setActiveView={setActiveView}
-              language={language}
-            />
-          </div>
-
-          <div className="flex items-center gap-3">
-            {/* Language Toggle Component */}
-            <div className="flex items-center gap-0.5 bg-white border border-[#E9ECEF] p-1 rounded-xl shadow-xs shrink-0 select-none">
-              <button
-                type="button"
-                onClick={() => setLanguage("bn")}
-                className={`px-2.5 py-1.5 rounded-lg text-xs font-black transition-all duration-200 flex items-center gap-1 cursor-pointer ${
-                  language === "bn" ? "bg-indigo-600 text-white shadow-xs" : "text-slate-600 hover:bg-slate-50"
-                }`}
-                id="lang-toggle-bn"
-                title="Bengali Language"
-              >
-                <span>🇧🇩</span>
-                <span className="hidden xs:inline">বাংলা</span>
-                <span className="xs:hidden">বাং</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setLanguage("en")}
-                className={`px-2.5 py-1.5 rounded-lg text-xs font-black transition-all duration-200 flex items-center gap-1 cursor-pointer ${
-                  language === "en" ? "bg-indigo-600 text-white shadow-xs" : "text-slate-600 hover:bg-slate-50"
-                }`}
-                id="lang-toggle-en"
-                title="English Language"
-              >
-                <span>🇬🇧</span>
-                <span className="hidden xs:inline">English</span>
-                <span className="xs:hidden">EN</span>
-              </button>
+              {/* Desktop Quick Action Buttons (hidden on mobile, shown on md+) */}
+              <div className="hidden md:flex items-center gap-1.5 ml-3">
+                <button 
+                  onClick={() => setActiveView("loadsheet")}
+                  className="px-2.5 py-1.5 bg-sky-50 text-sky-700 hover:bg-sky-100 border border-sky-150 rounded-lg text-xs font-black flex items-center gap-1.5 transition-all shadow-2xs select-none active:scale-95 cursor-pointer"
+                  title="Morning Load Sheet (সকাল: লোডশিট)"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-sky-500 animate-pulse shrink-0"></span>
+                  <span>Morning Load Sheet (সকাল: লোডশিট)</span>
+                </button>
+                <button 
+                  onClick={() => setActiveView("settle")}
+                  className="px-2.5 py-1.5 bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-150 rounded-lg text-xs font-black flex items-center gap-1.5 transition-all shadow-2xs select-none active:scale-95 cursor-pointer"
+                  title="Afternoon Load Sheet (বিকাল: হিসাব নিকেশ)"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse shrink-0"></span>
+                  <span>Afternoon Load Sheet (বিকাল: হিসাব নিকেশ)</span>
+                </button>
+                <button 
+                  onClick={() => setActiveView("customer-collection")}
+                  className="px-2.5 py-1.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-150 rounded-lg text-xs font-black flex items-center gap-1.5 transition-all shadow-2xs select-none active:scale-95 cursor-pointer"
+                  title="Customer Due Collection (কাস্টমার বকেয়া কালেকশন)"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
+                  <span>Customer Due Collection (কাস্টমার বকেয়া কালেকশন)</span>
+                </button>
+              </div>
             </div>
 
-            <button
-               onClick={() => setShowShortcuts(true)}
-               className="hidden sm:flex items-center gap-1.5 bg-white border border-[#E9ECEF] hover:bg-slate-50 text-slate-700 px-3 py-2 rounded-xl text-xs font-extrabold shadow-sm transition-all cursor-pointer select-none active:scale-95 shrink-0"
-               title={t("শর্টকাট (Shift+?)")}
-            >
-               <Keyboard className="w-4 h-4 text-slate-500 shrink-0" />
-               <span>{t("শর্টকাট (Shift+?)")}</span>
-            </button>
+            {/* Center: Global Search (Desktop view) */}
+            <div className="hidden md:block flex-1 max-w-md mx-2 lg:mx-4">
+              <GlobalSearchHeader 
+                products={products.data}
+                customers={customers.data}
+                sales={sales.data}
+                setActiveView={setActiveView}
+                language={language}
+              />
+            </div>
 
-            <button
-               onClick={triggerInstall}
-               className="flex items-center gap-1.5 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 text-white border border-indigo-600 px-3 py-2 rounded-xl text-xs font-extrabold shadow-sm hover:shadow transition-all cursor-pointer select-none active:scale-95 shrink-0"
-               title={t("মোবাইলে ইনস্টল")}
-            >
-               <Smartphone className="w-4 h-4 shrink-0 text-amber-300 animate-pulse" />
-               <span>{t("মোবাইলে ইনস্টল")}</span>
-            </button>
+            {/* Right Controls */}
+            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
 
-            {user?.uid === "demo-admin" && (
-               <div className="flex items-center gap-2 bg-indigo-50 border border-indigo-100 px-3.5 py-2 rounded-xl">
-                 <Sparkles className="w-4 h-4 text-indigo-500 animate-pulse shrink-0" />
-                 <span className="text-xs font-black text-indigo-700">{t("ডেমো মোড সক্রিয়")}</span>
-               </div>
-            )}
+              {/* Mobile Quick Actions Menu Trigger (Mobile only) */}
+              <div className="relative md:hidden">
+                <button
+                  onClick={() => setMobileQuickActionsOpen(!mobileQuickActionsOpen)}
+                  className="flex items-center gap-1 px-2.5 py-1.5 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-xl text-xs font-black shadow-2xs active:scale-95 transition-all cursor-pointer"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
+                  <span>কুইক এন্ট্রি</span>
+                  <ChevronDown className="w-3 h-3 text-indigo-200" />
+                </button>
 
-            {/* Global Audit & Reconciliation Health Indicator */}
-            <button
-              onClick={() => setActiveView("audit-compliance")}
-              className={`flex items-center gap-2 border px-3.5 py-2 rounded-xl transition-all cursor-pointer select-none active:scale-95 shrink-0 ${
-                auditHealth.loading
-                  ? "bg-gray-50 border-gray-150 text-gray-500"
-                  : auditHealth.hasDrift
-                  ? "bg-rose-50 hover:bg-rose-100 border-rose-200 text-rose-700 font-bold"
-                  : "bg-emerald-50 hover:bg-emerald-100 border-emerald-100 text-emerald-700 font-bold"
-              }`}
-              title={auditHealth.loading ? "অডিট ডাটা লোড হচ্ছে..." : auditHealth.hasDrift ? `অডিট সতর্কতা: ${auditHealth.totalDriftAmount} ৳ অমিল সনাক্ত হয়েছে!` : "হিসাব ১০০% সঠিক আছে"}
-            >
-              <span className={`w-2 h-2 rounded-full shrink-0 ${
-                auditHealth.loading
-                  ? "bg-gray-400"
-                  : auditHealth.hasDrift
-                  ? "bg-rose-600 animate-pulse"
-                  : "bg-emerald-500"
-              }`} />
-              <ShieldCheck className="w-4 h-4 shrink-0" />
-              <span className="text-xs hidden md:inline">
-                {auditHealth.loading 
-                  ? "অডিট হচ্ছে..." 
-                  : auditHealth.hasDrift 
-                  ? `অমিল: ৳ ${auditHealth.totalDriftAmount.toLocaleString()}` 
-                  : "১০০% ব্যালেন্সড"}
-              </span>
-            </button>
-
-            {isOnline ? (
-               <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-100 px-3.5 py-2 rounded-xl">
-                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
-                 <span className="text-xs font-black text-emerald-700">{t("অনলাইন সিঙ্ক সক্রিয়")}</span>
-               </div>
-            ) : (
-               <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 px-3.5 py-2 rounded-xl">
-                 <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse shrink-0" />
-                 <span className="text-xs font-black text-amber-700">{t("অফলাইন স্টোরেজ সক্রিয়")}</span>
-               </div>
-            )}
-            {totalPendingSync > 0 && (
-              <div className="relative group w-full lg:w-auto">
-                <div className="flex flex-col gap-1 bg-rose-50 border border-rose-200 px-3.5 py-2 rounded-xl cursor-help hover:bg-rose-100 transition-all shadow-xs">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse shrink-0" />
-                    <span className="text-xs font-black text-rose-700">{t("সিঙ্ক পেন্ডিং:")} {formatNumber(totalPendingSync)}</span>
+                {mobileQuickActionsOpen && (
+                  <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-start justify-center pt-16 px-4" onClick={() => setMobileQuickActionsOpen(false)}>
+                    <div className="w-full max-w-xs bg-white rounded-2xl shadow-2xl border border-slate-200 p-3 space-y-2 animate-in zoom-in-95 duration-150" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex justify-between items-center pb-2 border-b border-slate-100">
+                        <span className="text-xs font-black text-slate-800 flex items-center gap-1">
+                          <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                          দ্রুত এন্ট্রি নেভিগেশন
+                        </span>
+                        <button onClick={() => setMobileQuickActionsOpen(false)} className="p-1 rounded-lg hover:bg-slate-100 text-slate-400">
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                      <button 
+                        onClick={() => { setActiveView("loadsheet"); setMobileQuickActionsOpen(false); }}
+                        className="w-full p-2.5 bg-sky-50 hover:bg-sky-100 text-sky-800 rounded-xl text-xs font-black flex items-center gap-2 transition-all border border-sky-100 text-left"
+                      >
+                        <span className="w-2 h-2 rounded-full bg-sky-500 animate-pulse shrink-0"></span>
+                        <div>
+                          <div>Morning Load Sheet</div>
+                          <div className="text-[10px] font-semibold text-sky-600">সকাল: লোডশিট প্রিপারেশন</div>
+                        </div>
+                      </button>
+                      <button 
+                        onClick={() => { setActiveView("settle"); setMobileQuickActionsOpen(false); }}
+                        className="w-full p-2.5 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded-xl text-xs font-black flex items-center gap-2 transition-all border border-amber-100 text-left"
+                      >
+                        <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse shrink-0"></span>
+                        <div>
+                          <div>Afternoon Load Sheet</div>
+                          <div className="text-[10px] font-semibold text-amber-600">বিকাল: সেলস হিসাব নিকেশ</div>
+                        </div>
+                      </button>
+                      <button 
+                        onClick={() => { setActiveView("customer-collection"); setMobileQuickActionsOpen(false); }}
+                        className="w-full p-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-xl text-xs font-black flex items-center gap-2 transition-all border border-emerald-100 text-left"
+                      >
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
+                        <div>
+                          <div>Customer Due Collection</div>
+                          <div className="text-[10px] font-semibold text-emerald-600">কাস্টমার বকেয়া কালেকশন</div>
+                        </div>
+                      </button>
+                    </div>
                   </div>
-                  <div className="w-full bg-rose-200 h-1 rounded-full overflow-hidden">
-                    <div className="bg-rose-500 h-full animate-pulse" style={{ width: `${Math.min((totalPendingSync / 500) * 100, 100)}%` }}></div>
+                )}
+              </div>
+
+              {/* Mobile Global Search Button */}
+              <button
+                onClick={() => setMobileSearchOpen(!mobileSearchOpen)}
+                className="md:hidden p-2 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 rounded-xl shadow-2xs active:scale-95 transition-all"
+                title="Search"
+              >
+                <Search className="w-4 h-4 text-slate-600" />
+              </button>
+
+              {/* Mobile More Options Button */}
+              <button
+                onClick={() => setMobileMoreMenuOpen(!mobileMoreMenuOpen)}
+                className="md:hidden p-2 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 rounded-xl shadow-2xs active:scale-95 transition-all relative"
+                title="More Options"
+              >
+                <MoreVertical className="w-4 h-4 text-slate-600" />
+                {totalPendingSync > 0 && (
+                  <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-rose-500 rounded-full animate-ping" />
+                )}
+              </button>
+
+              {/* Desktop Language, Shortcuts, Install, Audit, Online Status Controls */}
+              <div className="hidden md:flex items-center gap-2">
+                {/* Language Toggle */}
+                <div className="flex items-center gap-0.5 bg-white border border-[#E9ECEF] p-1 rounded-xl shadow-xs shrink-0 select-none">
+                  <button
+                    type="button"
+                    onClick={() => setLanguage("bn")}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-black transition-all duration-200 flex items-center gap-1 cursor-pointer ${
+                      language === "bn" ? "bg-indigo-600 text-white shadow-xs" : "text-slate-600 hover:bg-slate-50"
+                    }`}
+                  >
+                    <span>🇧🇩</span>
+                    <span>বাংলা</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLanguage("en")}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-black transition-all duration-200 flex items-center gap-1 cursor-pointer ${
+                      language === "en" ? "bg-indigo-600 text-white shadow-xs" : "text-slate-600 hover:bg-slate-50"
+                    }`}
+                  >
+                    <span>🇬🇧</span>
+                    <span>EN</span>
+                  </button>
+                </div>
+
+                <button
+                  onClick={() => setShowShortcuts(true)}
+                  className="hidden lg:flex items-center gap-1.5 bg-white border border-[#E9ECEF] hover:bg-slate-50 text-slate-700 px-3 py-2 rounded-xl text-xs font-extrabold shadow-sm transition-all cursor-pointer select-none active:scale-95 shrink-0"
+                  title={t("শর্টকাট (Shift+?)")}
+                >
+                  <Keyboard className="w-4 h-4 text-slate-500 shrink-0" />
+                  <span>{t("শর্টকাট")}</span>
+                </button>
+
+                <button
+                  onClick={triggerInstall}
+                  className="flex items-center gap-1.5 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 text-white border border-indigo-600 px-3 py-2 rounded-xl text-xs font-extrabold shadow-sm hover:shadow transition-all cursor-pointer select-none active:scale-95 shrink-0"
+                  title={t("মোবাইলে ইনস্টল")}
+                >
+                  <Smartphone className="w-4 h-4 shrink-0 text-amber-300 animate-pulse" />
+                  <span>{t("মোবাইলে ইনস্টল")}</span>
+                </button>
+
+                {user?.uid === "demo-admin" && (
+                  <div className="flex items-center gap-2 bg-indigo-50 border border-indigo-100 px-3 py-2 rounded-xl">
+                    <Sparkles className="w-4 h-4 text-indigo-500 animate-pulse shrink-0" />
+                    <span className="text-xs font-black text-indigo-700">{t("ডেমো মোড")}</span>
+                  </div>
+                )}
+
+                {/* Audit Health */}
+                <button
+                  onClick={() => setActiveView("audit-compliance")}
+                  className={`flex items-center gap-2 border px-3 py-2 rounded-xl transition-all cursor-pointer select-none active:scale-95 shrink-0 ${
+                    auditHealth.loading
+                      ? "bg-gray-50 border-gray-150 text-gray-500"
+                      : auditHealth.hasDrift
+                      ? "bg-rose-50 hover:bg-rose-100 border-rose-200 text-rose-700 font-bold"
+                      : "bg-emerald-50 hover:bg-emerald-100 border-emerald-100 text-emerald-700 font-bold"
+                  }`}
+                  title={auditHealth.loading ? "অডিট ডাটা লোড হচ্ছে..." : auditHealth.hasDrift ? `অডিট সতর্কতা: ${auditHealth.totalDriftAmount} ৳ অমিল সনাক্ত হয়েছে!` : "হিসাব ১০০% সঠিক আছে"}
+                >
+                  <span className={`w-2 h-2 rounded-full shrink-0 ${
+                    auditHealth.loading
+                      ? "bg-gray-400"
+                      : auditHealth.hasDrift
+                      ? "bg-rose-600 animate-pulse"
+                      : "bg-emerald-500"
+                  }`} />
+                  <ShieldCheck className="w-4 h-4 shrink-0" />
+                  <span className="text-xs hidden lg:inline">
+                    {auditHealth.loading 
+                      ? "অডিট হচ্ছে..." 
+                      : auditHealth.hasDrift 
+                      ? `অমিল: ৳ ${auditHealth.totalDriftAmount.toLocaleString()}` 
+                      : "১০০% ব্যালেন্সড"}
+                  </span>
+                </button>
+
+                {/* Online Sync Status */}
+                {isOnline ? (
+                  <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-100 px-3 py-2 rounded-xl">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                    <span className="text-xs font-black text-emerald-700">{t("অনলাইন")}</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 px-3 py-2 rounded-xl">
+                    <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse shrink-0" />
+                    <span className="text-xs font-black text-amber-700">{t("অফলাইন")}</span>
+                  </div>
+                )}
+
+                {totalPendingSync > 0 && (
+                  <div className="relative group">
+                    <div className="flex flex-col gap-0.5 bg-rose-50 border border-rose-200 px-3 py-1.5 rounded-xl cursor-help hover:bg-rose-100 transition-all shadow-xs">
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse shrink-0" />
+                        <span className="text-xs font-black text-rose-700">{t("সিঙ্ক:")} {formatNumber(totalPendingSync)}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+            </div>
+          </div>
+
+          {/* Mobile Search Overlay Bar */}
+          {mobileSearchOpen && (
+            <div className="md:hidden px-3 pb-3 pt-1 border-t border-slate-200/60 bg-white animate-in slide-in-from-top-2 duration-150">
+              <div className="flex items-center gap-2">
+                <div className="flex-1">
+                  <GlobalSearchHeader 
+                    products={products.data}
+                    customers={customers.data}
+                    sales={sales.data}
+                    setActiveView={(view) => {
+                      setActiveView(view);
+                      setMobileSearchOpen(false);
+                    }}
+                    language={language}
+                  />
+                </div>
+                <button
+                  onClick={() => setMobileSearchOpen(false)}
+                  className="p-2 bg-slate-100 rounded-xl text-slate-500 hover:text-slate-700 text-xs font-bold"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Mobile More Options Sheet */}
+          {mobileMoreMenuOpen && (
+            <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-end justify-center" onClick={() => setMobileMoreMenuOpen(false)}>
+              <div className="w-full max-w-md bg-white rounded-t-3xl shadow-2xl border-t border-slate-200 p-5 space-y-3.5 animate-in slide-in-from-bottom duration-200" onClick={(e) => e.stopPropagation()}>
+                <div className="flex justify-between items-center pb-2 border-b border-slate-100">
+                  <span className="text-xs font-black uppercase tracking-wider text-slate-800">সিস্টেম সেটিংস ও স্ট্যাটাস</span>
+                  <button onClick={() => setMobileMoreMenuOpen(false)} className="p-1.5 rounded-xl hover:bg-slate-100 text-slate-400">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Language selector */}
+                <div className="flex justify-between items-center bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                  <span className="text-xs font-extrabold text-slate-700">ভাষা (Language)</span>
+                  <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-slate-200">
+                    <button
+                      onClick={() => { setLanguage("bn"); setMobileMoreMenuOpen(false); }}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-black ${language === "bn" ? "bg-indigo-600 text-white" : "text-slate-600"}`}
+                    >
+                      🇧🇩 বাংলা
+                    </button>
+                    <button
+                      onClick={() => { setLanguage("en"); setMobileMoreMenuOpen(false); }}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-black ${language === "en" ? "bg-indigo-600 text-white" : "text-slate-600"}`}
+                    >
+                      🇬🇧 EN
+                    </button>
                   </div>
                 </div>
-                <div className="absolute right-0 top-full mt-2 w-64 bg-white p-4 rounded-2xl shadow-xl border border-gray-150 z-50 hidden group-hover:block hover:block">
-                  <h4 className="text-xs font-black text-gray-800 border-b pb-1.5 mb-2 flex justify-between items-center">
-                    <span>{t("সিঙ্ক পেন্ডিং গাইড")}</span>
-                    <span className="bg-rose-100 text-rose-800 px-1.5 py-0.5 rounded text-[10px] font-bold">{formatNumber(totalPendingSync)} {t("টি আইটেম")}</span>
-                  </h4>
-                  <ul className="space-y-1.5 text-[11px] text-gray-650 font-semibold font-sans">
-                    {pendingItemsMap.map((p, i) => (
-                      <li key={p.name} className="flex justify-between items-center bg-gray-50 p-1.5 rounded-lg">
-                        <span>{t(p.name)}</span>
-                        <span className="bg-gray-200 text-gray-700 font-bold px-1.5 py-0.5 rounded">{formatNumber(p.count)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                  <p className="text-[9px] text-gray-400 mt-3 leading-relaxed">
-                    {t("ইন্টারনেট পুনরায় সংযোগ পাওয়া মাত্রই ডাটাবেজের সাথে এগুলো ক্লাউডে সিঙ্ক হয়ে যাবে।")}
-                  </p>
+
+                {/* Install Mobile App */}
+                <button
+                  onClick={() => { triggerInstall(); setMobileMoreMenuOpen(false); }}
+                  className="w-full p-3 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-2xl text-xs font-extrabold flex items-center justify-between shadow-sm active:scale-95 transition-transform"
+                >
+                  <div className="flex items-center gap-2">
+                    <Smartphone className="w-4 h-4 text-amber-300 animate-pulse" />
+                    <span>মোবাইলে অ্যাপ ইনস্টল করুন</span>
+                  </div>
+                  <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded-full">PWA</span>
+                </button>
+
+                {/* Audit Status */}
+                <button
+                  onClick={() => { setActiveView("audit-compliance"); setMobileMoreMenuOpen(false); }}
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-bold text-slate-700 flex items-center justify-between"
+                >
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-indigo-600" />
+                    <span>অডিট ও হিসাব ব্যালেন্স</span>
+                  </div>
+                  <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black ${
+                    auditHealth.hasDrift ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-700"
+                  }`}>
+                    {auditHealth.hasDrift ? `অমিল ৳${auditHealth.totalDriftAmount}` : "১০০% ব্যালেন্সড"}
+                  </span>
+                </button>
+
+                {/* Network Sync Status */}
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-bold text-slate-700 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className={`w-2.5 h-2.5 rounded-full ${isOnline ? "bg-emerald-500 animate-pulse" : "bg-amber-500"}`} />
+                    <span>নেটওয়ার্ক সিঙ্ক</span>
+                  </div>
+                  <span className="text-slate-500 font-bold">{isOnline ? "অনলাইন একটিভ" : "অফলাইন মোড"}</span>
                 </div>
               </div>
-            )}
-            <div className="hidden lg:flex items-center gap-4 bg-white px-4 py-2 rounded-xl shadow-sm border border-[#E9ECEF]">
-               <span className="text-xs font-bold text-gray-600">{new Date().toLocaleDateString(language === "en" ? 'en-US' : 'bn-BD', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</span>
             </div>
-          </div>
+          )}
         </header>
 
         <main className="flex-1 w-full lg:px-8 lg:pb-8 p-4">
@@ -2037,6 +2580,21 @@ export default function App() {
         customers={customers.data}
         orders={orders.data}
         setActiveView={setActiveView}
+      />
+
+      <DocumentScannerModal
+        isOpen={isOcrModalOpen}
+        onClose={() => setIsOcrModalOpen(false)}
+        onImportPurchase={(data) => {
+          setOcrPreFill(data);
+          setActiveView("purchase");
+          toast.success("ক্রয় বিল মডিউলে ডেটা পাঠানো হয়েছে!");
+        }}
+        onImportSale={(data) => {
+          setOcrPreFill(data);
+          setActiveView("orders");
+          toast.success("অর্ডার এন্ট্রি মডিউলে ডেটা পাঠানো হয়েছে!");
+        }}
       />
 
       <Toaster position="bottom-right" />

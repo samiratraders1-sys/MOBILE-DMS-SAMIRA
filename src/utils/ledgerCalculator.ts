@@ -79,7 +79,7 @@ export function calculateLedger(
   supplierBreakdown["all"] = { sales: 0, payments: 0, returns: 0, due: 0 };
 
   // Track customer initial opening balance
-  if (partyType === "customer" && initialOpeningBalance > 0) {
+  if (partyType === "customer" && initialOpeningBalance !== 0) {
     supplierBreakdown["all"].due += initialOpeningBalance;
   }
 

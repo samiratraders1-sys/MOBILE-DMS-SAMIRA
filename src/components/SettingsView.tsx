@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Trash2, AlertTriangle, MessageSquare, Plus, Download, Database, RefreshCw, Upload, Image, Sparkles, Tag, Edit2, Users } from "lucide-react";
+import { Trash2, AlertTriangle, MessageSquare, Plus, Download, Database, RefreshCw, Upload, Image, Sparkles, Tag, Edit2, Users, Palette } from "lucide-react";
 import CustomerGroupsView from "./CustomerGroupsView";
 import { performAppStorageCleanup, APP_VERSION } from "../lib/cleanup";
+import { THEME_PALETTES, applyThemePalette } from "../lib/theme";
 
 import { db } from "../lib/firebase";
 import { collection, getDocs, writeBatch, doc, addDoc, deleteDoc, updateDoc } from "firebase/firestore";
@@ -28,6 +29,7 @@ const RESET_OPTIONS: ResetOption[] = [
 ];
 
 interface SettingsViewProps {
+  role?: string;
   categories: any[];
   incomeCategories: any[];
   addIncomeCategory: (data: any) => Promise<void>;
@@ -36,6 +38,7 @@ interface SettingsViewProps {
 }
 
 export default function SettingsView({ 
+  role = "view-only",
   categories: propsCategories,
   incomeCategories = [],
   addIncomeCategory,
@@ -71,6 +74,7 @@ export default function SettingsView({
   const [printAuto, setPrintAuto] = useState(false);
   const [printCopies, setPrintCopies] = useState(1);
   const [savingSettings, setSavingSettings] = useState(false);
+  const [selectedThemePalette, setSelectedThemePalette] = useState(() => localStorage.getItem("brand-palette") || "default");
 
   useEffect(() => {
     if (company) {
@@ -347,41 +351,47 @@ export default function SettingsView({
     }
   };
 
-  const handleExportBackup = async () => {
+  const handleExportBackup = async (onlyCore: boolean = false) => {
+    if (role !== "admin") {
+      toast.error("শুধুমাত্র এডমিন ব্যাকআপ ডাউনলোড করতে পারবেন!");
+      return;
+    }
     setIsExporting(true);
     setExportStatus("ব্যাকআপ প্রস্তুত হচ্ছে...");
     try {
       const backupData: Record<string, any[]> = {};
-      const criticalCollections = [
-        "products",
-        "routes",
-        "staff",
-        "summaries",
-        "customers",
-        "suppliers",
-        "orders",
-        "sales",
-        "users",
-        "roles",
-        "transfers",
-        "payments",
-        "categories",
-        "damageInventory",
-        "purchases",
-        "accounts",
-        "incomeCategories",
-        "subDbs",
-        "subDbShipments",
-        "subDbSettings",
-        "stockAdjustments",
-        "boms",
-        "productions",
-        "attendance",
-        "payroll",
-        "fixedAssets",
-        "loans",
-        "returns"
-      ];
+      const criticalCollections = onlyCore 
+        ? ["products", "sales", "customers", "suppliers"]
+        : [
+            "products",
+            "routes",
+            "staff",
+            "summaries",
+            "customers",
+            "suppliers",
+            "orders",
+            "sales",
+            "users",
+            "roles",
+            "transfers",
+            "payments",
+            "categories",
+            "damageInventory",
+            "purchases",
+            "accounts",
+            "incomeCategories",
+            "subDbs",
+            "subDbShipments",
+            "subDbSettings",
+            "stockAdjustments",
+            "boms",
+            "productions",
+            "attendance",
+            "payroll",
+            "fixedAssets",
+            "loans",
+            "returns"
+          ];
 
       for (const colName of criticalCollections) {
         setExportStatus(`ডাউনলোড হচ্ছে: ${colName}...`);
@@ -397,6 +407,7 @@ export default function SettingsView({
       const fullBackup = {
         appName: "Samira Traders DMS",
         exportedAt: new Date().toISOString(),
+        backupType: onlyCore ? "Core Collections (Products, Sales, Customers, Suppliers)" : "Full Database",
         collections: backupData
       };
 
@@ -408,7 +419,10 @@ export default function SettingsView({
       downloadAnchor.setAttribute("href", downloadUrl);
       
       const dateStr = new Date().toISOString().split("T")[0];
-      downloadAnchor.setAttribute("download", `samira_traders_backup_${dateStr}.json`);
+      const fileName = onlyCore 
+        ? `samira_traders_core_backup_${dateStr}.json`
+        : `samira_traders_full_backup_${dateStr}.json`;
+      downloadAnchor.setAttribute("download", fileName);
       
       document.body.appendChild(downloadAnchor);
       downloadAnchor.click();
@@ -422,7 +436,7 @@ export default function SettingsView({
       }
 
       setExportStatus("সফলভাবে ডাউনলোড সম্পন্ন হয়েছে!");
-      toast.success("ব্যাকআপ ফাইল সফলভাবে প্রস্তুত ও ডাউনলোড করা হয়েছে!");
+      toast.success(`${onlyCore ? "কোর কালেকশন" : "ফুল ডেটাবেস"} ব্যাকআপ সফলভাবে ডাউনলোড হয়েছে!`);
       setTimeout(() => setExportStatus(""), 5000);
     } catch (error) {
       console.error("Backup export failed: ", error);
@@ -1117,13 +1131,60 @@ export default function SettingsView({
         </div>
       </div>
 
-      {/* GRID 3: CASH SAFETY & BACKUP DOWNLOAD */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      {/* GRID 3: PALETTE, CASH SAFETY & BACKUP DOWNLOAD */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        {/* BRAND COLOR PALETTE CARD */}
+        <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-xs flex flex-col justify-between">
+          <div>
+            <h3 className="font-bold text-gray-950 flex items-center gap-2 mb-2">
+              <Palette className="w-5 h-5 text-indigo-600" /> ব্র্যান্ড কালার প্যালেট (Brand Colors)
+            </h3>
+            <p className="text-xs text-gray-500 mb-4 leading-relaxed font-semibold">
+              আপনার সমেরা ট্রেডার্স (DMS) অ্যাপ্লিকেশনের জন্য একটি আকর্ষণীয় থিম কালার প্যালেট নির্বাচন করুন। এটি সমস্ত বাটন, হেডার ও অ্যাকসেন্ট কালার পরিবর্তন করবে।
+            </p>
+
+            <div className="space-y-2.5">
+              {THEME_PALETTES.map((palette) => (
+                <button
+                  key={palette.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedThemePalette(palette.id);
+                    applyThemePalette(palette.id);
+                    toast.success(`থিম সফলভাবে '${palette.name}' এ সেট করা হয়েছে!`);
+                  }}
+                  className={`w-full flex items-center justify-between p-3 border rounded-xl transition cursor-pointer select-none text-left ${
+                    selectedThemePalette === palette.id
+                      ? "border-indigo-600 bg-indigo-50/50 font-bold"
+                      : "border-gray-200 hover:bg-gray-50 text-gray-700"
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <span
+                      className="w-4.5 h-4.5 rounded-full border border-gray-350 shadow-inner inline-block"
+                      style={{ backgroundColor: palette.colors[600] }}
+                    />
+                    <span className="text-xs">{palette.name}</span>
+                  </div>
+                  {selectedThemePalette === palette.id && (
+                    <span className="w-2 h-2 rounded-full bg-indigo-600" />
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+          
+          <div className="text-[10px] text-gray-400 mt-4 text-center font-medium">
+            * এটি আপনার লোকাল ব্রাউজারে সংরক্ষিত থাকবে
+          </div>
+        </div>
+
         {/* CASH SAFETY CARD */}
         <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-xs flex flex-col justify-between">
           <div>
             <h3 className="font-bold text-gray-950 flex items-center gap-2 mb-2">
-              <AlertTriangle className="w-5 h-5 text-amber-500" /> দৈনিক ক্যাশ সেফটি লিমিট (Cash Safety Threshold)
+              <AlertTriangle className="w-5 h-5 text-amber-500" /> দৈনিক ক্যাশ সেফটি লিমিট (Cash Safety)
             </h3>
             <p className="text-xs text-gray-500 mb-4 leading-relaxed font-semibold">
               দৈনিক ক্যাশ বুক খতিয়ানে তরল অর্থের একটি নিরাপদ সীমা (Safety Limit) সেট করুন। যদি কোনো নির্দিষ্ট দিনে সমাপনী ক্যাশ এই অ্যামউন্টের নিচে নেমে যায়, সিস্টেমে সতর্কবার্তা দেখাবে।
@@ -1168,10 +1229,10 @@ export default function SettingsView({
         <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-xs flex flex-col justify-between">
           <div>
             <h3 className="font-bold text-gray-950 flex items-center gap-2 mb-2">
-              <Database className="w-5 h-5 text-indigo-600" /> অফলাইন ডাটা ব্যাকআপ ডাউনলোড (Manual Redundancy Backup)
+              <Database className="w-5 h-5 text-indigo-600" /> ডাটাবেস ব্যাকআপ ডাউনলোড (Admin Backup)
             </h3>
             <p className="text-xs text-gray-500 mb-4 leading-relaxed font-semibold">
-              আপনার সমেরা ট্রেডার্স অ্যাপের সমস্ত বিক্রয় খতিয়ান, ইনভেন্টরি, ড্যামেজ হিস্ট্রি, কাস্টমার, সাপ্লায়ার এবং সেটিংস সহ মোট ২১টি প্রধান কালেকশন ১টি নিরাপদ JSON ফাইলে সংরক্ষণ করুন।
+              আপনার সমেরা ট্রেডার্স ফায়ারবেস ক্লাউড ডেটাবেস থেকে নিরাপদ JSON ব্যাকআপ ফাইল ডাউনলোড করুন। (শুধুমাত্র এডমিনদের জন্য অনুমোদিত ফিচার)
             </p>
           </div>
 
@@ -1184,13 +1245,24 @@ export default function SettingsView({
             
             <button
               id="backup-now-button"
-              onClick={handleExportBackup}
-              disabled={isExporting}
-              className="w-full bg-[#111827] hover:bg-[#1f2937] disabled:bg-[#4b5563] text-white py-3 rounded-xl flex items-center justify-center gap-2 text-xs font-black transition-all cursor-pointer shadow-xs active:scale-98"
-              title="এখনি সমস্ত ডাটা ব্যাকআপ ডাউনলোড করুন"
+              onClick={() => handleExportBackup(true)}
+              disabled={isExporting || role !== "admin"}
+              className="w-full bg-[#111827] hover:bg-[#1f2937] disabled:bg-[#4b5563] text-white py-2.5 rounded-xl flex items-center justify-center gap-2 text-xs font-black transition-all cursor-pointer shadow-xs active:scale-98"
+              title="পণ্য, বিক্রয়, কাস্টমার ও সাপ্লায়ার কালেকশন ব্যাকআপ নিন"
             >
               <Download className="w-4 h-4" />
-              <span>{isExporting ? "প্রসেসিং হচ্ছে..." : "ব্যাকআপ নাও (Backup Now)"}</span>
+              <span>{isExporting ? "প্রসেসিং হচ্ছে..." : "ডাউনলোড ডাটাবেস ব্যাকআপ (Core JSON)"}</span>
+            </button>
+
+            <button
+              id="backup-full-button"
+              onClick={() => handleExportBackup(false)}
+              disabled={isExporting || role !== "admin"}
+              className="w-full bg-slate-100 hover:bg-slate-200 border border-gray-300 disabled:bg-gray-100 text-gray-800 py-2.5 rounded-xl flex items-center justify-center gap-2 text-xs font-extrabold transition-all cursor-pointer active:scale-98"
+              title="সম্পূর্ণ ডেটাবেস ব্যাকআপ ফাইল ডাউনলোড করুন"
+            >
+              <Database className="w-4 h-4" />
+              <span>সম্পূর্ণ সিস্টেম ব্যাকআপ (Full JSON)</span>
             </button>
           </div>
         </div>

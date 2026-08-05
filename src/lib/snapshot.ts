@@ -1,5 +1,5 @@
 import { db, auth } from "./firebase";
-import { collection, getDocs } from "firebase/firestore";
+import { collection, getDocs, query, where } from "firebase/firestore";
 
 const COLLECTIONS_TO_SNAPSHOT = [
     "products", "routes", "staff", "summaries", "customers", 
@@ -41,12 +41,19 @@ export const snapshotAll = async () => {
         // Log the Firestore object to check its type in browser console
         console.log("Firestore DB instance:", db);
 
+        const companyId = localStorage.getItem("companyId");
+        
         for (const name of COLLECTIONS_TO_SNAPSHOT) {
             try {
                 // Ensure name is a string and valid collection name
                 if (typeof name !== 'string') continue;
                 
-                const snap = await getDocs(collection(db, name));
+                const isSystemCollection = ["companies", "licenses", "subscriptions", "roles", "permissions"].includes(name);
+                const q = (isSystemCollection || !companyId)
+                    ? query(collection(db, name))
+                    : query(collection(db, name), where("companyId", "==", companyId));
+
+                const snap = await getDocs(q);
                 const data = snap.docs.map(d => ({id: d.id, ...d.data()}));
                 localStorage.setItem(`snapshot_${name}`, JSON.stringify(data));
             } catch (err) {
