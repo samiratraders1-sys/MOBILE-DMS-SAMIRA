@@ -500,9 +500,9 @@ export default function DashboardView(props: DashboardProps) {
     // 8. Profit for the period (Net Profit from our profitEngine)
     const profitForThePeriod = netProfit;
 
-    // 9. Business Investment (Original starting equity + accounts opening balances)
+    // 9. Business Investment (Total accounts opening balances / capital equity)
     const openingBalSum = (accounts || []).reduce((sum: number, a: any) => sum + Number(a.openingBalance || 0), 0);
-    const businessInvestment = 2500000 + openingBalSum;
+    const businessInvestment = openingBalSum;
 
     return {
       totalSales,

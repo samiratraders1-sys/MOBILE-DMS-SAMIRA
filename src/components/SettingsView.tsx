@@ -20,6 +20,8 @@ const RESET_OPTIONS: ResetOption[] = [
   { id: "sales", label: "সেলস ও এন্ট্রি (অর্ডার, সেলস ও রুট সামারি)", collections: ["orders", "summaries", "sales"] },
   { id: "subdb_sales", label: "সাব-ডিবি সেলস ও শিপমেন্ট", collections: ["subDbShipments"] },
   { id: "payments", label: "পেমেন্ট ও রিসিভ", collections: ["payments"] },
+  { id: "expenses", label: "খরচ ও ব্যয় (Expenses)", collections: ["expenses"] },
+  { id: "accounts", label: "একাউন্ট ও ব্যাংক ব্যালেন্স", collections: ["accounts"] },
   { id: "damage", label: "ড্যামেজ এন্ট্রি", collections: ["damageInventory"] },
   { id: "products", label: "প্রোডাক্ট ও ইনভেন্টরি", collections: ["products"] },
   { id: "customers", label: "কাস্টমার", collections: ["customers"] },
