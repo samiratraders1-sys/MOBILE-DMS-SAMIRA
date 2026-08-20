@@ -1584,6 +1584,7 @@ export default function App() {
             staff={staff.data}
             routes={routes.data}
             customers={customers.data}
+            suppliers={suppliers.data}
             updateSummary={summaries.update}
             updateCustomer={customers.update}
             updateProduct={products.update}

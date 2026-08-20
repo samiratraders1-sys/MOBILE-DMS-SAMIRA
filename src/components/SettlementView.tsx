@@ -7,6 +7,7 @@ interface SettlementProps {
   staff?: any[];
   routes?: any[];
   customers?: any[];
+  suppliers?: any[];
   updateSummary?: (id: string, item: any) => Promise<void>;
   updateCustomer?: (id: string, item: any) => Promise<void>;
   updateProduct?: (id: string, item: any) => Promise<void>;
@@ -22,6 +23,7 @@ export default function SettlementView({
   staff = [],
   routes = [],
   customers = [],
+  suppliers = [],
   updateSummary,
   onApproveSettlement
 }: SettlementProps) {
@@ -32,6 +34,7 @@ export default function SettlementView({
       staff={staff}
       routes={routes}
       customers={customers}
+      suppliers={suppliers}
       updateSummary={updateSummary}
       onApproveSettlement={onApproveSettlement}
     />
