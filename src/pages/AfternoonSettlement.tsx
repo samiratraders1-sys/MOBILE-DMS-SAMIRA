@@ -62,27 +62,6 @@ export default function AfternoonSettlementPage({
   const [selectedSummaryId, setSelectedSummaryId] = useState<string>("");
   const [isPrintModalOpen, setIsPrintModalOpen] = useState<boolean>(false);
 
-  const today = new Date().toISOString().split("T")[0];
-
-  // Filter summaries for today or open/pending ones
-  const activeSummaries = useMemo(() => {
-    return (summaries || []).filter(s => {
-      const summDate = s.date || (s.createdAt ? new Date(s.createdAt?.toDate ? s.createdAt.toDate() : s.createdAt).toISOString().split("T")[0] : today);
-      return summDate === today || s.status === 'open' || s.status === 'pending_approval';
-    });
-  }, [summaries, today]);
-
-  // Select first summary by default if none selected
-  useEffect(() => {
-    if (!selectedSummaryId && activeSummaries.length > 0) {
-      setSelectedSummaryId(activeSummaries[0].id);
-    }
-  }, [activeSummaries, selectedSummaryId]);
-
-  const currentSummary = useMemo(() => {
-    return (summaries || []).find(s => s.id === selectedSummaryId) || activeSummaries[0] || null;
-  }, [summaries, selectedSummaryId, activeSummaries]);
-
   // Local editable states for current summary settlement
   const [returnQtys, setReturnQtys] = useState<{ [key: string]: number }>({});
   
@@ -119,6 +98,27 @@ export default function AfternoonSettlementPage({
   // Form inputs for cash collection
   const [payMethod, setPayMethod] = useState("Cash");
   const [payAmt, setPayAmt] = useState("");
+
+  const today = new Date().toISOString().split("T")[0];
+
+  // Filter summaries for today or open/pending ones
+  const activeSummaries = useMemo(() => {
+    return (summaries || []).filter(s => {
+      const summDate = s.date || (s.createdAt ? new Date(s.createdAt?.toDate ? s.createdAt.toDate() : s.createdAt).toISOString().split("T")[0] : today);
+      return summDate === today || s.status === 'open' || s.status === 'pending_approval';
+    });
+  }, [summaries, today]);
+
+  // Select first summary by default if none selected
+  useEffect(() => {
+    if (!selectedSummaryId && activeSummaries.length > 0) {
+      setSelectedSummaryId(activeSummaries[0].id);
+    }
+  }, [activeSummaries, selectedSummaryId]);
+
+  const currentSummary = useMemo(() => {
+    return (summaries || []).find(s => s.id === selectedSummaryId) || activeSummaries[0] || null;
+  }, [summaries, selectedSummaryId, activeSummaries]);
 
   // Sync draft states when currentSummary changes
   useEffect(() => {

@@ -261,7 +261,7 @@ export function useCollection<T>(collectionName: string) {
         unsubscribeSnap = null;
       }
 
-      if (!user) {
+      if (!user || !db) {
         setData([]);
         setLoading(false);
         return;

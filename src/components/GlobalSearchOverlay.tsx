@@ -34,8 +34,11 @@ export default function GlobalSearchOverlay({ isOpen, onClose, products, custome
     }
   }, [isOpen]);
 
-  const results = useMemo(() => {
+  useEffect(() => {
     setSelectedIndex(0);
+  }, [query]);
+
+  const results = useMemo(() => {
     if (!query) return [];
     
     const searchResults = searchIndex.current.search(query, {

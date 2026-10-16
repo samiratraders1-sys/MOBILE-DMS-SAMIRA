@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { recordStockMovement } from "../lib/inventoryEngine";
 import { MovementType } from "../lib/stockMovement";
 import { Plus, X, ShoppingBag, Truck, DollarSign, Trash2, Loader2, Sparkles, Calendar, User, Wallet } from "lucide-react";
@@ -96,13 +96,13 @@ export default function QuickActions({
   const [generatedReceipt, setGeneratedReceipt] = useState<any>(null);
 
   // Auto-initialize account selects if data exists
-  useMemo(() => {
+  useEffect(() => {
     if (accounts.length > 0) {
       if (!saleAccount) setSaleAccount(accounts[0].id);
       if (!purchaseAccount) setPurchaseAccount(accounts[0].id);
       if (!expAccount) setExpAccount(accounts[0].id);
     }
-  }, [accounts]);
+  }, [accounts, saleAccount, purchaseAccount, expAccount]);
 
   // Safe helper to grab product by ID
   const findProduct = (id: string) => products.find((p) => p.id === id);

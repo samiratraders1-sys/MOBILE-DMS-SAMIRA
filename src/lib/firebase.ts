@@ -1,43 +1,24 @@
-import { initializeApp, deleteApp } from 'firebase/app';
+import { initializeApp, deleteApp, getApps, getApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 import { 
   getFirestore,
-  enableMultiTabIndexedDbPersistence,
-  enableIndexedDbPersistence,
-  setLogLevel
+  setLogLevel,
+  doc,
+  getDocFromServer
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
-// Suppress benign warnings (like sub-second clock skew warnings) in the console
-setLogLevel('error');
-
-const app = initializeApp(firebaseConfig);
-
-// Safely initialize Firestore instance synchronously
-let dbInstance: any;
-
+// Suppress benign warnings in the console
 try {
-  dbInstance = getFirestore(app, firebaseConfig.firestoreDatabaseId);
-} catch (error) {
-  console.warn("Failed to getFirestore with custom database ID. Trying default...", error);
-  try {
-    dbInstance = getFirestore(app);
-  } catch (err2) {
-    console.error("CRITICAL: Failed to initialize Firestore completely:", err2);
-  }
+  setLogLevel('error');
+} catch (e) {
+  // ignore
 }
 
-// Asynchronously enable offline database persistence
-if (dbInstance) {
-  enableMultiTabIndexedDbPersistence(dbInstance).catch((err) => {
-    console.warn("Multi-tab offline persistence failed, trying single-tab...", err);
-    enableIndexedDbPersistence(dbInstance).catch((err2) => {
-      console.warn("IndexedDB offline persistence failed entirely. Operating in memory-only mode.", err2);
-    });
-  });
-}
+export const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
-export const db = dbInstance;
+// Initialize Firestore with designated database ID (CRITICAL as specified by Firebase skill)
+export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId || undefined);
 
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
@@ -68,4 +49,15 @@ export const createFirebaseUser = async (email: string, password: string) => {
   }
 };
 
-
+// Validate Firestore connection non-blockingly on boot
+if (typeof window !== 'undefined' && db) {
+  (async () => {
+    try {
+      await getDocFromServer(doc(db, 'test', 'connection'));
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('the client is offline')) {
+        console.error("Please check your Firebase configuration.");
+      }
+    }
+  })();
+}

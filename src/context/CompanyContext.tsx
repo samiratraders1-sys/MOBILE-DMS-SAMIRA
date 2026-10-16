@@ -104,33 +104,35 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       let userDocData: any = null;
 
       try {
-        // 1. Try to get the user document by UID (fastest, most secure, compliant with rules)
-        const userDocRef = doc(db, 'users', user.uid);
-        const userDocSnap = await getDoc(userDocRef);
-        if (userDocSnap.exists()) {
-          userDocData = userDocSnap.data();
-          currentCompanyId = userDocData.companyId;
-        } else {
-          // 2. If it doesn't exist, query by email
-          const q = query(collection(db, 'users'), where('email', '==', user.email?.trim().toLowerCase()));
-          const querySnapshot = await getDocs(q);
-          if (!querySnapshot.empty) {
-            const existingDoc = querySnapshot.docs[0];
-            const existingData = existingDoc.data();
-            currentCompanyId = existingData.companyId;
+        if (db) {
+          // 1. Try to get the user document by UID (fastest, most secure, compliant with rules)
+          const userDocRef = doc(db, 'users', user.uid);
+          const userDocSnap = await getDoc(userDocRef);
+          if (userDocSnap.exists()) {
+            userDocData = userDocSnap.data();
+            currentCompanyId = userDocData.companyId;
+          } else {
+            // 2. If it doesn't exist, query by email
+            const q = query(collection(db, 'users'), where('email', '==', user.email?.trim().toLowerCase()));
+            const querySnapshot = await getDocs(q);
+            if (!querySnapshot.empty) {
+              const existingDoc = querySnapshot.docs[0];
+              const existingData = existingDoc.data();
+              currentCompanyId = existingData.companyId;
 
-            // Clone to their uid for seamless future reads & security rule compliance
-            userDocData = {
-              uid: user.uid,
-              name: existingData.name || user.displayName || 'User',
-              email: user.email?.trim().toLowerCase(),
-              role: existingData.role || 'view-only',
-              roleId: existingData.roleId || existingData.role || 'view-only',
-              companyId: existingData.companyId,
-              staffId: existingData.staffId || '',
-              createdAt: existingData.createdAt || new Date().toISOString()
-            };
-            await setDoc(doc(db, 'users', user.uid), userDocData);
+              // Clone to their uid for seamless future reads & security rule compliance
+              userDocData = {
+                uid: user.uid,
+                name: existingData.name || user.displayName || 'User',
+                email: user.email?.trim().toLowerCase(),
+                role: existingData.role || 'view-only',
+                roleId: existingData.roleId || existingData.role || 'view-only',
+                companyId: existingData.companyId,
+                staffId: existingData.staffId || '',
+                createdAt: existingData.createdAt || new Date().toISOString()
+              };
+              await setDoc(doc(db, 'users', user.uid), userDocData);
+            }
           }
         }
       } catch (err) {
@@ -138,7 +140,7 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
 
       // Automatically bootstrap Samira Traders for the admin email
-      if (user.email === 'samiratraders1@gmail.com' || user.email === 'samiratraders.barguna@gmail.com') {
+      if (db && (user.email === 'samiratraders1@gmail.com' || user.email === 'samiratraders.barguna@gmail.com')) {
         try {
           // Ensure Company exists
           await setDoc(doc(db, 'companies', 'samira-traders'), {
@@ -208,6 +210,11 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
 
       setLoadingCompany(true);
+
+      if (!db) {
+        setLoadingCompany(false);
+        return;
+      }
 
       // 1. Listen to active Company details
       const companyRef = doc(db, 'companies', currentCompanyId);
