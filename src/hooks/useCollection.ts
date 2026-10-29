@@ -378,6 +378,7 @@ export function useCollection<T>(collectionName: string) {
         toast.error("আপনার কোম্পানির লাইসেন্স মেয়াদোত্তীর্ণ বা স্থগিত করা হয়েছে। সিস্টেমটি এখন রিড-অনলি মোডে আছে।");
         return undefined;
       }
+      if (!db) throw new Error("Firestore is not initialized");
       if (!auth.currentUser || (!companyId && !isSystemCollection)) throw new Error("Not logged in or no company selected");
       const isOffline = typeof navigator !== "undefined" && !navigator.onLine;
       const cleanedItem = cleanUndefined(item);
@@ -451,6 +452,7 @@ export function useCollection<T>(collectionName: string) {
         toast.error("আপনার কোম্পানির লাইসেন্স মেয়াদোত্তীর্ণ বা স্থগিত করা হয়েছে। সিস্টেমটি এখন রিড-অনলি মোডে আছে।");
         return;
       }
+      if (!db) throw new Error("Firestore is not initialized");
       const isOffline = typeof navigator !== "undefined" && !navigator.onLine;
       
       // Keep track of old info before update
@@ -531,6 +533,7 @@ export function useCollection<T>(collectionName: string) {
         toast.error("আপনার কোম্পানির লাইসেন্স মেয়াদোত্তীর্ণ বা স্থগিত করা হয়েছে। সিস্টেমটি এখন রিড-অনলি মোডে আছে।");
         return;
       }
+      if (!db) throw new Error("Firestore is not initialized");
       // Find item in state before deleting
       const itemToDelete: any = data.find((x: any) => x.id === id);
       const itemName = itemToDelete?.name || itemToDelete?.customerName || itemToDelete?.description || itemToDelete?.title || id;

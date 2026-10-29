@@ -290,7 +290,7 @@ export async function syncExistingToTransactions(
       const updated = [...cleanedMissing, ...current];
       localStorage.setItem("demo_coll_transactions", JSON.stringify(updated));
       window.dispatchEvent(new CustomEvent("local-db-change", { detail: { collectionName: "transactions" } }));
-    } else {
+    } else if (db) {
       // Save batch to Firestore
       for (const tx of missingTx) {
         try {
