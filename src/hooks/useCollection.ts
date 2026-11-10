@@ -118,7 +118,7 @@ function getInitialMockData(collectionName: string): any[] {
           name: "admin", 
           displayName: "Super Admin", 
           permissions: ["pos_create", "view_reports", "manage_users"], 
-          allowedViews: ["dashboard", "menu", "inventory", "entities", "customers", "suppliers", "sales", "purchases", "order-mgmt", "settlement", "reports", "finance", "dsr-portal", "admin-approvals", "sub-db", "payment-history", "daily-cashbook", "damage", "advanced-ops", "dms-enterprise", "enterprise-suites", "delivery-route", "super-admin", "roles", "users", "ledger", "unified-ledger", "activity-log", "pos", "sr-order", "sr-order-list"] 
+          allowedViews: ["dashboard", "menu", "inventory", "entities", "customers", "suppliers", "sales", "purchases", "order-mgmt", "settlement", "reports", "finance", "dsr-portal", "admin-approvals", "sub-db", "payment-history", "daily-cashbook", "damage", "delivery-route", "super-admin", "roles", "users", "ledger", "unified-ledger", "activity-log", "pos", "sr-order", "sr-order-list"] 
         },
         { 
           id: "manager", 

@@ -338,8 +338,13 @@ export default function DamageView({ products, suppliers, damageInventory, user,
                             {tx.quantity} {tx.unit}
                           </span>
                         </td>
-                        <td className="px-6 py-4 text-slate-500 text-xs font-medium max-w-[200px] truncate">
-                          {tx.notes || (isRet ? "কোম্পানি ড্যামেজ রিটার্ন" : "রুট সেটেলমেন্টে প্রাপ্ত ড্যামেজ")}
+                        <td className="px-6 py-4 text-slate-500 text-xs font-medium max-w-[220px]">
+                          {tx.reason && (
+                            <span className="inline-block bg-red-50 text-red-700 border border-red-200 px-2 py-0.5 rounded text-[10px] font-bold mr-1.5 mb-1">
+                              {tx.reason}
+                            </span>
+                          )}
+                          <span className="truncate block">{tx.notes || (isRet ? "কোম্পানি ড্যামেজ রিটার্ন" : "রুট সেটেলমেন্টে প্রাপ্ত ড্যামেজ")}</span>
                         </td>
                       </tr>
                     );

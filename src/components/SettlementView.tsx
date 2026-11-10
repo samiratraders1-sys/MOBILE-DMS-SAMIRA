@@ -25,6 +25,11 @@ export default function SettlementView({
   customers = [],
   suppliers = [],
   updateSummary,
+  updateCustomer,
+  updateProduct,
+  addDamage,
+  addExpense,
+  role,
   onApproveSettlement
 }: SettlementProps) {
   return (
@@ -36,6 +41,11 @@ export default function SettlementView({
       customers={customers}
       suppliers={suppliers}
       updateSummary={updateSummary}
+      updateCustomer={updateCustomer}
+      updateProduct={updateProduct}
+      addDamage={addDamage}
+      addExpense={addExpense}
+      role={role}
       onApproveSettlement={onApproveSettlement}
     />
   );

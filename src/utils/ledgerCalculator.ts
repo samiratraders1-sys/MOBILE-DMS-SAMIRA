@@ -1,4 +1,4 @@
-import { doc, setDoc } from "firebase/firestore";
+import { doc, setDoc, query, collection, where, limit, getDocs } from "firebase/firestore";
 import { db } from "../lib/firebase";
 
 export interface TransactionDoc {
@@ -18,26 +18,123 @@ export interface TransactionDoc {
 }
 
 /**
- * Dynamic Ledger Calculation Engine
- * Centrally computes the exact dues and supplier-wise breakdown to prevent calculation drift.
+ * Pre-indexed transaction lookup structure to avoid O(N * M) full-array scans.
+ */
+export interface TransactionIndex {
+  byPartyId: Map<string, TransactionDoc[]>;
+  bySupplierId: Map<string, TransactionDoc[]>;
+  allSorted: TransactionDoc[];
+  rawArray: TransactionDoc[];
+}
+
+// Global WeakMap to memoize transaction indexes across react renders without memory leaks
+const transactionIndexCache = new WeakMap<object, TransactionIndex>();
+
+/**
+ * Builds an index of transactions bucketed by partyId and supplierId in a single O(N) pass.
+ * Each bucket is chronologically sorted once to guarantee O(1) retrieval for any party.
+ */
+export function buildTransactionIndex(transactions: TransactionDoc[]): TransactionIndex {
+  const byPartyId = new Map<string, TransactionDoc[]>();
+  const bySupplierId = new Map<string, TransactionDoc[]>();
+
+  if (!Array.isArray(transactions) || transactions.length === 0) {
+    return {
+      byPartyId,
+      bySupplierId,
+      allSorted: [],
+      rawArray: transactions || []
+    };
+  }
+
+  for (let i = 0; i < transactions.length; i++) {
+    const t = transactions[i];
+    if (!t) continue;
+
+    // Index by partyId
+    if (t.partyId) {
+      let partyList = byPartyId.get(t.partyId);
+      if (!partyList) {
+        partyList = [];
+        byPartyId.set(t.partyId, partyList);
+      }
+      partyList.push(t);
+    }
+
+    // Index by supplierId
+    if (t.supplierId) {
+      let suppList = bySupplierId.get(t.supplierId);
+      if (!suppList) {
+        suppList = [];
+        bySupplierId.set(t.supplierId, suppList);
+      }
+      suppList.push(t);
+    }
+  }
+
+  // Pre-sort each party bucket once chronologically (oldest first)
+  byPartyId.forEach((list) => {
+    list.sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")));
+  });
+
+  return {
+    byPartyId,
+    bySupplierId,
+    allSorted: transactions,
+    rawArray: transactions
+  };
+}
+
+/**
+ * Retrieves an existing index from the WeakMap cache or constructs a new one.
+ */
+export function getOrBuildTransactionIndex(
+  transactionsOrIndex: TransactionDoc[] | TransactionIndex
+): TransactionIndex {
+  if (!transactionsOrIndex) {
+    return buildTransactionIndex([]);
+  }
+
+  // Already an index object
+  if (
+    typeof transactionsOrIndex === "object" &&
+    "byPartyId" in transactionsOrIndex &&
+    (transactionsOrIndex as any).byPartyId instanceof Map
+  ) {
+    return transactionsOrIndex as TransactionIndex;
+  }
+
+  const arr = transactionsOrIndex as TransactionDoc[];
+  if (typeof arr === "object" && arr !== null) {
+    const cached = transactionIndexCache.get(arr);
+    if (cached) {
+      return cached;
+    }
+    const built = buildTransactionIndex(arr);
+    transactionIndexCache.set(arr, built);
+    return built;
+  }
+
+  return buildTransactionIndex(arr);
+}
+
+/**
+ * Dynamic Ledger Calculation Engine using Indexed Lookups.
+ * Reduces complexity from O(N * M) to O(1) party retrieval and O(K) party-specific computation.
  */
 export function calculateLedger(
   partyId: string,
   partyType: "customer" | "supplier" | "staff",
-  transactions: TransactionDoc[],
+  transactionsOrIndex: TransactionDoc[] | TransactionIndex,
   suppliers: any[],
   products: any[],
   initialOpeningBalance: number = 0
 ) {
-  // Filter transactions for this party
-  const partyTx = transactions.filter(t => t.partyId === partyId);
+  // 1. Instant O(1) retrieval of party-specific transactions using index
+  const index = getOrBuildTransactionIndex(transactionsOrIndex);
+  const sortedTx = index.byPartyId.get(partyId) || [];
 
-  // Sort chronologically (oldest first)
-  const sortedTx = [...partyTx].sort((a, b) => {
-    return String(a.date || "").localeCompare(String(b.date || ""));
-  });
-
-  // Calculate overall balance
+  // 2. Calculate overall balance and per-transaction logs
   let runningBal = initialOpeningBalance;
   const logs = sortedTx.map(t => {
     let effect = 0;
@@ -68,22 +165,21 @@ export function calculateLedger(
     };
   });
 
-  // Supplier-wise breakdown for Customers
+  // 3. Supplier-wise breakdown for Customers
   const supplierBreakdown: Record<string, { sales: number; payments: number; returns: number; due: number }> = {};
   
-  // Initialize breakdown for all active suppliers
-  suppliers.forEach(s => {
-    supplierBreakdown[s.id] = { sales: 0, payments: 0, returns: 0, due: 0 };
-  });
-  // Add a generic fallback supplier if needed
+  if (Array.isArray(suppliers)) {
+    suppliers.forEach(s => {
+      supplierBreakdown[s.id] = { sales: 0, payments: 0, returns: 0, due: 0 };
+    });
+  }
   supplierBreakdown["all"] = { sales: 0, payments: 0, returns: 0, due: 0 };
 
-  // Track customer initial opening balance
   if (partyType === "customer" && initialOpeningBalance !== 0) {
     supplierBreakdown["all"].due += initialOpeningBalance;
   }
 
-  // Aggregate customer transactions per supplier
+  // Fast aggregation over only this customer's pre-filtered transactions
   if (partyType === "customer") {
     sortedTx.forEach(t => {
       const sId = t.supplierId || "all";
@@ -101,7 +197,7 @@ export function calculateLedger(
         supplierBreakdown[sId].returns += t.amount;
         supplierBreakdown[sId].due -= t.amount;
       } else if (t.type === "payment_out") {
-        supplierBreakdown[sId].payments -= t.amount; // negative payment_in is payment_out
+        supplierBreakdown[sId].payments -= t.amount;
         supplierBreakdown[sId].due += t.amount;
       } else if (t.type === "opening") {
         supplierBreakdown[sId].due += t.amount;
@@ -109,10 +205,12 @@ export function calculateLedger(
     });
   }
 
-  // Format supplier breakdown list
+  // Pre-index suppliers for O(1) name lookup
+  const supplierMap = new Map((suppliers || []).map(s => [s.id, s]));
+
   const breakdownList = Object.entries(supplierBreakdown)
     .map(([id, data]) => {
-      const supp = suppliers.find(s => s.id === id);
+      const supp = supplierMap.get(id);
       return {
         supplierId: id,
         supplierName: supp ? (supp.company || supp.name) : (id === "all" ? "সাধারণ / সমস্ত সাপ্লায়ার" : "অজানা সাপ্লায়ার"),
@@ -124,8 +222,53 @@ export function calculateLedger(
   return {
     totalDue: runningBal,
     supplierBreakdown: breakdownList,
-    logs: [...logs].reverse() // newest first for ledger logs
+    logs: [...logs].reverse() // newest first for display
   };
+}
+
+/**
+ * On-demand Firestore index-based query to retrieve transactions for a specific party
+ * without downloading or evaluating the entire global transactions collection.
+ */
+export async function queryPartyTransactionsFromDb(
+  partyId: string,
+  limitCount: number = 200
+): Promise<TransactionDoc[]> {
+  if (!db || !partyId) return [];
+  try {
+    const q = query(
+      collection(db, "transactions"),
+      where("partyId", "==", partyId),
+      limit(limitCount)
+    );
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as TransactionDoc));
+  } catch (error) {
+    console.error(`[queryPartyTransactionsFromDb] Error querying transactions for ${partyId}:`, error);
+    return [];
+  }
+}
+
+/**
+ * On-demand Firestore index-based query to retrieve transactions for a specific supplier.
+ */
+export async function querySupplierTransactionsFromDb(
+  supplierId: string,
+  limitCount: number = 200
+): Promise<TransactionDoc[]> {
+  if (!db || !supplierId) return [];
+  try {
+    const q = query(
+      collection(db, "transactions"),
+      where("supplierId", "==", supplierId),
+      limit(limitCount)
+    );
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as TransactionDoc));
+  } catch (error) {
+    console.error(`[querySupplierTransactionsFromDb] Error querying transactions for supplier ${supplierId}:`, error);
+    return [];
+  }
 }
 
 function cleanUndefined(obj: any): any {
@@ -141,8 +284,8 @@ function cleanUndefined(obj: any): any {
 }
 
 /**
- * Self-healing automatic generator to populate transactions from existing collections
- * Runs in the background to ensure backward compatibility and prevent data loss.
+ * Self-healing automatic generator to populate transactions from existing collections.
+ * Uses Set and Map indexing to avoid nested quadratic loops on startup.
  */
 export async function syncExistingToTransactions(
   sales: any[],
@@ -157,13 +300,17 @@ export async function syncExistingToTransactions(
 ) {
   const newTxList: TransactionDoc[] = [];
 
+  // Pre-index products for instant O(1) lookup
+  const productMap = new Map((products || []).map(p => [p.id, p]));
+  const customerIdSet = new Set((customers || []).map(c => c.id));
+  const supplierIdSet = new Set((suppliers || []).map(s => s.id));
+
   // 1. Process Sales (Customer purchases)
-  sales.forEach(sale => {
+  (sales || []).forEach(sale => {
     if (!sale || !sale.id || !sale.customerId) return;
-    // Determine supplier proportions in this sale
     const supplierTotals: Record<string, number> = {};
     (sale.items || []).forEach((item: any) => {
-      const p = products.find(prod => prod.id === (item.productId || item.id));
+      const p = productMap.get(item.productId || item.id);
       const sId = p?.supplierId || "all";
       const val = Number(item.total || (Number(item.qty || item.quantity || 0) * Number(item.price || 0)) || 0);
       supplierTotals[sId] = (supplierTotals[sId] || 0) + val;
@@ -172,10 +319,8 @@ export async function syncExistingToTransactions(
     const saleTotal = Number(sale.total || sale.totalAmount || 0);
     const calculatedTotal = Object.values(supplierTotals).reduce((a, b) => a + b, 0);
 
-    // If we have items and we can split
     if (calculatedTotal > 0 && Object.keys(supplierTotals).length > 0) {
       Object.entries(supplierTotals).forEach(([sId, val]) => {
-        // Proportional split of sale.total
         const share = val / calculatedTotal;
         const txAmount = saleTotal * share;
         const txId = `${sale.id}_${sId}`;
@@ -194,7 +339,6 @@ export async function syncExistingToTransactions(
         });
       });
     } else {
-      // Fallback: entire sale to "all" supplier
       newTxList.push({
         id: sale.id,
         partyId: sale.customerId,
@@ -211,10 +355,10 @@ export async function syncExistingToTransactions(
   });
 
   // 2. Process Payments (Customer receipts / Supplier payments)
-  payments.forEach(pay => {
+  (payments || []).forEach(pay => {
     if (!pay || !pay.id || !pay.entityId) return;
-    const isCust = customers.some(c => c.id === pay.entityId);
-    const isSupp = suppliers.some(s => s.id === pay.entityId);
+    const isCust = customerIdSet.has(pay.entityId);
+    const isSupp = supplierIdSet.has(pay.entityId);
     
     let partyType: "customer" | "supplier" | "staff" = "customer";
     if (isSupp) partyType = "supplier";
@@ -238,9 +382,9 @@ export async function syncExistingToTransactions(
   });
 
   // 3. Process Returns
-  returns.forEach(ret => {
+  (returns || []).forEach(ret => {
     if (!ret || !ret.id || !ret.customerId) return;
-    const p = products.find(prod => prod.id === ret.productId);
+    const p = productMap.get(ret.productId);
     const sId = p?.supplierId || "all";
 
     newTxList.push({
@@ -258,7 +402,7 @@ export async function syncExistingToTransactions(
   });
 
   // 4. Process Purchases (Supplier bills)
-  purchases.forEach(pur => {
+  (purchases || []).forEach(pur => {
     if (!pur || !pur.id || !pur.supplierId) return;
     newTxList.push({
       id: pur.id,
@@ -274,11 +418,8 @@ export async function syncExistingToTransactions(
     });
   });
 
-  // Keep only valid transactions (ID and Party ID must exist)
   const validTxList = newTxList.filter(t => t && t.id && t.partyId);
-
-  // Filter out transactions that are already in firestore transactions
-  const existingIds = new Set(existingTx.map(t => t.id));
+  const existingIds = new Set((existingTx || []).map(t => t.id));
   const missingTx = validTxList.filter(t => !existingIds.has(t.id));
 
   if (missingTx.length > 0) {
@@ -291,7 +432,6 @@ export async function syncExistingToTransactions(
       localStorage.setItem("demo_coll_transactions", JSON.stringify(updated));
       window.dispatchEvent(new CustomEvent("local-db-change", { detail: { collectionName: "transactions" } }));
     } else if (db) {
-      // Save batch to Firestore
       for (const tx of missingTx) {
         try {
           const cleanedTx = cleanUndefined({
@@ -318,8 +458,8 @@ export interface DriftReport {
 }
 
 /**
- * Background worker to check transaction drift
- * Specifically flags any transaction drift (calculated balance != saved balance)
+ * Background worker to check transaction drift.
+ * Uses index-based retrieval to compute drifts in a single pass without freezing the UI.
  */
 export function checkTransactionDrift(
   customers: any[],
@@ -335,9 +475,12 @@ export function checkTransactionDrift(
   const drifts: DriftReport[] = [];
   let totalDriftAmount = 0;
 
+  // Build index once for all checks
+  const index = getOrBuildTransactionIndex(transactions);
+
   // 1. Check Customers
   (customers || []).forEach(c => {
-    const { totalDue } = calculateLedger(c.id, "customer", transactions, suppliers, products, 0);
+    const { totalDue } = calculateLedger(c.id, "customer", index, suppliers, products, 0);
     const saved = Number(c.balance !== undefined ? c.balance : (c.due !== undefined ? c.due : 0));
     const diff = totalDue - saved;
     if (Math.abs(diff) > 0.05) {
@@ -355,7 +498,7 @@ export function checkTransactionDrift(
 
   // 2. Check Suppliers
   (suppliers || []).forEach(s => {
-    const { totalDue } = calculateLedger(s.id, "supplier", transactions, suppliers, products, 0);
+    const { totalDue } = calculateLedger(s.id, "supplier", index, suppliers, products, 0);
     const saved = Number(s.balance !== undefined ? s.balance : (s.due !== undefined ? s.due : 0));
     const diff = totalDue - saved;
     if (Math.abs(diff) > 0.05) {
@@ -373,7 +516,7 @@ export function checkTransactionDrift(
 
   // 3. Check Staff
   (staff || []).forEach(st => {
-    const { totalDue } = calculateLedger(st.id, "staff", transactions, suppliers, products, 0);
+    const { totalDue } = calculateLedger(st.id, "staff", index, suppliers, products, 0);
     const saved = Number(st.balance !== undefined ? st.balance : (st.due !== undefined ? st.due : 0));
     const diff = totalDue - saved;
     if (Math.abs(diff) > 0.05) {
@@ -395,4 +538,3 @@ export function checkTransactionDrift(
     hasDrift: drifts.length > 0
   };
 }
-

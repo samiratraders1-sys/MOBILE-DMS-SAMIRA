@@ -50,9 +50,6 @@ import PaymentHistoryView from "./components/PaymentHistoryView";
 import DailyCashBookView from "./components/DailyCashBookView";
 import QuickActions from "./components/QuickActions";
 import DamageView from "./components/DamageView";
-import AdvancedOpsView from "./components/AdvancedOpsView";
-import DMSEnterpriseView from "./components/DMSEnterpriseView";
-import EnterpriseSuitesView from "./components/EnterpriseSuitesView";
 import SuperAdminView from "./components/SuperAdminView";
 import ReportsPage from "./pages/Reports";
 import OrderManagementPage from "./pages/OrderManagement";
@@ -936,6 +933,8 @@ export default function App() {
           supplierId: p?.supplierId || "unknown",
           quantity: Number(d.quantity),
           price: Number(d.price || p?.price || 0),
+          reason: d.reason || "রুট সেটেলমেন্টে প্রাপ্ত ড্যামেজ",
+          notes: d.reason ? `ড্যামেজ কারণ: ${d.reason}` : "রুট সেটেলমেন্টে প্রাপ্ত ড্যামেজ",
           date: settlementDate,
           createdAt: new Date().toISOString()
         });
@@ -1345,36 +1344,6 @@ export default function App() {
             updateCustomer={customers.update}
             updateSupplier={suppliers.update}
             updateStaff={staff.update}
-          />
-        );
-      case "advanced-ops":
-        return (
-          <AdvancedOpsView
-            products={products.data}
-            updateProduct={products.update}
-            suppliers={suppliers.data}
-            customers={customers.data}
-            staff={staff.data}
-            payments={payments.data}
-            boms={boms}
-            productions={productions}
-            attendance={attendance}
-            payroll={payroll}
-            fixedAssets={fixedAssets}
-            loans={loans}
-            returns={returns}
-            transfers={transfers}
-            addDamage={damageInventory.add}
-          />
-        );
-      case "dms-suite":
-        return (
-          <DMSEnterpriseView
-            products={products.data}
-            customers={customers.data}
-            suppliers={suppliers.data}
-            role={role}
-            user={user}
           />
         );
       case "companies":
@@ -1955,14 +1924,6 @@ export default function App() {
             addIncomeCategory={async (data) => { await incomeCategories.add(data); }}
             removeIncomeCategory={async (id) => { await incomeCategories.remove(id); }}
             customerGroups={customerGroups}
-          />
-        );
-      case "enterprise-suites":
-        if (role !== 'admin') return <AccessDeniedView />;
-        return (
-          <EnterpriseSuitesView 
-            role={role}
-            userEmail={user?.email || ""}
           />
         );
       case "audit-compliance":

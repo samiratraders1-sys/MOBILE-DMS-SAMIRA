@@ -24,12 +24,14 @@ import {
 import toast from "react-hot-toast";
 import { calculateCartonPieces, calculateLineTotal } from "../utils/calculations";
 import { exportToPDF } from "../services/reportService";
+import { completeSale } from "../services/salesService";
 
 const ORDER_STATUSES = [
   { id: "pending", label: "মুলতুবি", color: "bg-amber-100 text-amber-800 border-amber-200", icon: Clock },
   { id: "processing", label: "প্রক্রিয়াকরণাধীন", color: "bg-blue-100 text-blue-800 border-blue-200", icon: RefreshCw },
   { id: "shipped", label: "পাঠানো হয়েছে", color: "bg-purple-100 text-purple-800 border-purple-200", icon: Truck },
   { id: "delivered", label: "বিতরণ করা হয়েছে", color: "bg-emerald-100 text-emerald-800 border-emerald-200", icon: CheckCircle2 },
+  { id: "Complete", label: "কমপ্লিট (বিক্রয় সম্পন্ন)", color: "bg-emerald-100 text-emerald-900 border-emerald-300", icon: CheckCircle2 },
   { id: "cancelled", label: "বাতিল", color: "bg-rose-100 text-rose-800 border-rose-200", icon: XCircle }
 ];
 
@@ -153,7 +155,7 @@ export default function OrderManagementPage({
 
       if (o.status === "pending") pendingCount++;
       else if (o.status === "processing" || o.status === "shipped") processingCount++;
-      else if (o.status === "delivered") deliveredCount++;
+      else if (o.status === "delivered" || o.status === "Complete") deliveredCount++;
       else if (o.status === "cancelled") cancelledCount++;
     });
 
@@ -293,6 +295,34 @@ export default function OrderManagementPage({
   // Quick Status Update
   const handleStatusUpdate = async (orderId: string, newStatus: string) => {
     if (!updateOrder) return;
+    const orderObj = safeOrders.find((o) => o.id === orderId);
+
+    // শর্ত ১ ও ২: Order status 'Complete' হলে completeSale() এর মাধ্যমে transaction ও ইনভেন্টরি কর্তন
+    if (newStatus === "Complete" && orderObj && orderObj.status !== "Complete") {
+      const toastId = toast.loading("ইনভেন্টরি ট্রানজ্যাকশন ও সেলস রিপোর্ট প্রসেস হচ্ছে...");
+      try {
+        const res = await completeSale({
+          orderId: orderObj.id,
+          status: "Complete",
+          sales_items: orderObj.items || [],
+          companyId: orderObj.companyId || "samira-traders",
+          customerId: orderObj.customerId,
+          customerName: orderObj.customerName,
+          createdBy: orderObj.createdBy || "Admin"
+        });
+        toast.dismiss(toastId);
+        toast.success(res.message);
+        if (selectedOrder && selectedOrder.id === orderId) {
+          setSelectedOrder((prev: any) => ({ ...prev, status: "Complete" }));
+        }
+        return;
+      } catch (txErr: any) {
+        toast.dismiss(toastId);
+        toast.error(txErr?.message || "স্টক বা ট্রানজ্যাকশন ত্রুটি!");
+        return;
+      }
+    }
+
     try {
       await updateOrder(orderId, { status: newStatus });
       toast.success("অর্ডারের স্ট্যাটাস সফলভাবে আপডেট হয়েছে");

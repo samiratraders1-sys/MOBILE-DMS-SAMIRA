@@ -7,6 +7,7 @@ import DSRPortalMap from "./DSRPortalMap";
 import { formatCurrency, piecesToCartoon, getGroupColors } from "../lib/utils";
 import toast from "react-hot-toast";
 import { calculateLedger } from "../utils/ledgerCalculator";
+import DamageSettlementModule, { DamageItem } from "./settlement/DamageSettlementModule";
 
 const EXPENSE_HEADS = [
   { id: "carriage", name: "পরিবহন খরচ / ক্যারেজ (Carriage)" },
@@ -92,6 +93,7 @@ export default function DSRPortalView({
   // Local Form states for returns and entries
   const [returnQtys, setReturnQtys] = useState<{ [key: string]: number }>({});
   const [damageQtys, setDamageQtys] = useState<{ [key: string]: number }>({});
+  const [damageItems, setDamageItems] = useState<DamageItem[]>([]);
   
   // Extra elements
   const [freeItems, setFreeItems] = useState<{ productId: string; quantity: number }[]>([]);
@@ -122,6 +124,23 @@ export default function DSRPortalView({
     if (activeSummary) {
       if (activeSummary.draftReturnQtys) setReturnQtys(activeSummary.draftReturnQtys);
       if (activeSummary.draftDamageQtys) setDamageQtys(activeSummary.draftDamageQtys);
+      if (activeSummary.damageItems || activeSummary.draftDamageItems) {
+        setDamageItems(activeSummary.damageItems || activeSummary.draftDamageItems || []);
+      } else if (activeSummary.draftDamageQtys) {
+        // Fallback from legacy draftDamageQtys dictionary
+        const converted = Object.entries(activeSummary.draftDamageQtys)
+          .filter(([_, q]) => Number(q) > 0)
+          .map(([pId, q]) => {
+            const p = products.find(x => x.id === pId);
+            return {
+              productId: pId,
+              productName: p?.name || "Product",
+              quantity: Number(q),
+              price: Number(p?.price || 0)
+            };
+          });
+        setDamageItems(converted);
+      }
       if (activeSummary.draftFreeItems) setFreeItems(activeSummary.draftFreeItems);
       if (activeSummary.draftDiscountItems) setDiscountItems(activeSummary.draftDiscountItems);
       if (activeSummary.draftExpenses) setExpenses(activeSummary.draftExpenses);
@@ -130,6 +149,7 @@ export default function DSRPortalView({
     } else {
       setReturnQtys({});
       setDamageQtys({});
+      setDamageItems([]);
       setFreeItems([]);
       setDiscountItems([]);
       setExpenses([]);
@@ -146,19 +166,19 @@ export default function DSRPortalView({
     const items = activeSummary.items.map((item: any) => {
       const pId = item.productId;
       const ret = returnQtys[pId] || 0;
-      const dmg = damageQtys[pId] || 0;
-      const soldQty = Math.max(0, item.totalPieces - ret - dmg);
+      const soldQty = Math.max(0, item.totalPieces - ret);
       const saleVal = soldQty * (item.price || 0);
       totalSalesValue += saleVal;
 
       return {
         ...item,
         returns: ret,
-        damage: dmg,
         soldQty,
         saleValue: saleVal
       };
     });
+
+    const totalDamageValue = damageItems.reduce((acc, d) => acc + (Number(d.quantity) * Number(d.price)), 0);
 
     const totalFreeValue = freeItems.reduce((acc, f) => {
       const prodObj = products.find(p => p.id === f.productId);
@@ -170,13 +190,14 @@ export default function DSRPortalView({
     const totalCreditsValue = credits.reduce((acc, c) => acc + c.amount, 0);
     const totalPaymentsValue = payments.reduce((acc, p) => acc + p.amount, 0);
 
-    // DSR Payable = (Total Sales) - (Free Value) - (Discounts) - (Expenses) - (Credits/Baki)
-    const dsrPayable = totalSalesValue - totalFreeValue - totalDiscountValue - totalExpensesValue - totalCreditsValue;
+    // DSR Payable = (Total Sales) - (Damage Value) - (Free Value) - (Discounts) - (Expenses) - (Credits/Baki)
+    const dsrPayable = totalSalesValue - totalDamageValue - totalFreeValue - totalDiscountValue - totalExpensesValue - totalCreditsValue;
     const balance = totalPaymentsValue - dsrPayable;
 
     return {
       items,
       totalSalesValue,
+      totalDamageValue,
       totalFreeValue,
       totalDiscountValue,
       totalExpensesValue,
@@ -185,7 +206,7 @@ export default function DSRPortalView({
       dsrPayable,
       balance
     };
-  }, [activeSummary, returnQtys, damageQtys, freeItems, discountItems, expenses, credits, payments, products]);
+  }, [activeSummary, returnQtys, damageItems, freeItems, discountItems, expenses, credits, payments, products]);
 
   const handleReturnChange = (productId: string, val: number) => {
     setReturnQtys(prev => ({
@@ -302,24 +323,17 @@ export default function DSRPortalView({
       const coords = await getCurrentLocation();
       toast.dismiss(locationToast);
 
-      // Build damageItems array from damageQtys dictionary
-      const constructedDamageItems = Object.entries(damageQtys)
-        .filter(([_, qty]) => Number(qty) > 0)
-        .map(([pId, qty]) => {
-          const product = products.find(p => p.id === pId);
-          const q = Number(qty);
-          const pr = Number(product?.price || 0);
-          return {
-            productId: pId,
-            quantity: q,
-            price: pr
-          };
-        });
+      // Build legacy damageQtys dictionary for backwards compatibility
+      const legacyDamageQtys: { [key: string]: number } = {};
+      damageItems.forEach(d => {
+        legacyDamageQtys[d.productId] = (legacyDamageQtys[d.productId] || 0) + d.quantity;
+      });
 
       const payload = {
         // Keep drafts too for safe reference
         draftReturnQtys: returnQtys,
-        draftDamageQtys: damageQtys,
+        draftDamageQtys: legacyDamageQtys,
+        draftDamageItems: damageItems,
         draftFreeItems: freeItems,
         draftDiscountItems: discountItems,
         draftExpenses: expenses,
@@ -337,20 +351,19 @@ export default function DSRPortalView({
           totalPieces: item.totalPieces || 0,
           price: item.price || 0,
           returns: item.returns || 0,
-          damage: item.damage || 0,
           soldQty: item.soldQty || 0,
           saleValue: item.saleValue || 0
         })),
         freeItems: freeItems,
         discountItems: discountItems,
-        damageItems: constructedDamageItems,
+        damageItems: damageItems,
         expenses: expenses.map(e => ({ type: e.type, amount: e.amount, description: e.description })),
         credits: credits,
         payments: payments,
         salesValue: calculations.totalSalesValue,
         totalFreeValue: calculations.totalFreeValue,
         totalDiscountValue: calculations.totalDiscountValue,
-        totalDamageValue: constructedDamageItems.reduce((acc, d) => acc + (d.quantity * d.price), 0),
+        totalDamageValue: calculations.totalDamageValue,
         totalExpenses: calculations.totalExpensesValue,
         totalCredits: calculations.totalCreditsValue,
         totalPayments: calculations.totalPaymentsValue,
@@ -517,17 +530,15 @@ export default function DSRPortalView({
                     <tr className="border-b text-xs text-gray-400 font-bold uppercase tracking-wider text-left bg-gray-50/50">
                       <th className="p-3">পণ্যের বিবরণ</th>
                       <th className="p-3 text-center">লোডেড পিস (Loaded)</th>
-                      <th className="p-3 text-center w-28">রিটার্ন পিস (Return)</th>
-                      <th className="p-3 text-center w-28">ড্যামেজ পিস (Damage)</th>
-                      <th className="p-3 text-right">বিক্রয় পিস (Sold)</th>
+                      <th className="p-3 text-center w-36">ভালো ফেরত (Fresh Return)</th>
+                      <th className="p-3 text-right">প্রকৃত বিক্রয় (Sold)</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {activeSummary.items?.map((item: any) => {
                       const pId = item.productId;
                       const ret = returnQtys[pId] || 0;
-                      const dmg = damageQtys[pId] || 0;
-                      const sold = Math.max(0, item.totalPieces - ret - dmg);
+                      const sold = Math.max(0, item.totalPieces - ret);
                       const prodObj = products.find(p => p.id === pId);
 
                       return (
@@ -543,22 +554,11 @@ export default function DSRPortalView({
                             <input 
                               type="number" 
                               min="0"
-                              max={item.totalPieces - dmg}
+                              max={item.totalPieces}
                               value={ret || ""}
                               onChange={e => handleReturnChange(pId, Number(e.target.value))}
                               placeholder="0"
-                              className="w-20 p-2 text-center border-2 border-teal-200/50 rounded-xl font-bold bg-teal-50/20 text-teal-800 text-sm focus:border-teal-500 transition-colors"
-                            />
-                          </td>
-                          <td className="p-3 text-center">
-                            <input 
-                              type="number" 
-                              min="0"
-                              max={item.totalPieces - ret}
-                              value={dmg || ""}
-                              onChange={e => handleDamageChange(pId, Number(e.target.value))}
-                              placeholder="0"
-                              className="w-20 p-2 text-center border-2 border-orange-200/50 rounded-xl font-bold bg-orange-50/20 text-orange-850 text-sm focus:border-orange-500 transition-colors"
+                              className="w-24 p-2 text-center border-2 border-teal-200/50 rounded-xl font-bold bg-teal-50/20 text-teal-800 text-sm focus:border-teal-500 transition-colors"
                             />
                           </td>
                           <td className="p-3 text-right font-black text-gray-950">
@@ -571,6 +571,14 @@ export default function DSRPortalView({
                 </table>
               </div>
             </div>
+
+            {/* Dedicated Searchable Damage Module */}
+            <DamageSettlementModule
+              products={products}
+              damageItems={damageItems}
+              onChangeDamageItems={setDamageItems}
+              loadedProductIds={activeSummary.items?.map((it: any) => it.productId) || []}
+            />
 
             {/* Sub-modals for extra Entries: Row of Free, Discount, Expenses */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -908,6 +916,10 @@ export default function DSRPortalView({
                 <div className="flex justify-between">
                   <span className="text-gray-500">মোট বিক্রয়মূল্য (+):</span>
                   <span className="font-extrabold text-gray-900">{formatCurrency(calculations?.totalSalesValue)}</span>
+                </div>
+                <div className="flex justify-between text-red-600">
+                  <span className="text-gray-500">ড্যামেজ পণ্য সমন্বয় (-):</span>
+                  <span className="font-extrabold">{formatCurrency(calculations?.totalDamageValue)}</span>
                 </div>
                 <div className="flex justify-between text-purple-600">
                   <span className="text-gray-500">ফ্রী প্রোডাক্ট বাদ (-):</span>
