@@ -53,6 +53,8 @@ export function calculateSaleTotals(items: SaleItem[] = [], extraDiscount: numbe
   });
 
   const subTotalAfterItemDisc = Math.max(0, grossTotal - totalItemDiscounts);
+  // FIX: netTotal = discount-পরবর্তী কিন্তু ট্যাক্স-পূর্ব মূল্য; finalTotal = ট্যাক্সসহ প্রদেয়
+  // (আগে netTotal-এর জায়গায় finalTotal ফেরত দেওয়া হতো — ট্যাক্স ভেতরে ঢুকে যেত)
   const netTotal = Math.max(0, subTotalAfterItemDisc - (Number(extraDiscount) || 0));
   const taxAmount = (netTotal * (Number(taxRate) || 0)) / 100;
   const finalTotal = netTotal + taxAmount;
@@ -64,18 +66,27 @@ export function calculateSaleTotals(items: SaleItem[] = [], extraDiscount: numbe
     totalItemDiscounts,
     extraDiscount: Number(extraDiscount) || 0,
     subTotalAfterItemDisc,
-    netTotal: finalTotal,
-    taxAmount
+    netTotal,
+    taxAmount,
+    finalTotal
   };
 }
 
 export function calculateCustomerBalance(transactions: any[] = [], initialBalance: number = 0): number {
   let balance = Number(initialBalance) || 0;
+  // FIX: ছোট/বড় হাতের দুই ফরম্যাটের টাইপই বোঝে (settlementEngine uppercase DUE/COLLECTION পোস্ট করে)
+  const norm = (raw: any): string => {
+    const u = String(raw || "").toUpperCase();
+    if (["SALE", "DUE", "DEBIT", "SHORT"].includes(u)) return "due";
+    if (["PAYMENT", "PAYMENT_IN", "PAYMENT_OUT", "CREDIT", "COLLECTION", "RETURN"].includes(u)) return "credit";
+    return String(raw || "").toLowerCase();
+  };
   (transactions || []).forEach(tx => {
     const amt = Number(tx.amount) || 0;
-    if (tx.type === "sale" || tx.type === "debit" || tx.type === "due") {
+    const t = norm(tx.type);
+    if (t === "due") {
       balance += amt;
-    } else if (tx.type === "payment" || tx.type === "credit" || tx.type === "collection" || tx.type === "return") {
+    } else if (t === "credit") {
       balance -= amt;
     }
   });
@@ -105,7 +116,8 @@ export function calculateProfitLoss(
   const totalOperatingExpenses = calculateExpenseTotal(expenses);
   const totalDamageLoss = calculateDamageTotal(damage);
 
-  const grossProfit = Math.max(0, totalSalesRevenue - totalPurchasesCost);
+  // FIX: ক্ষতি হলে সেটা দেখাতে হবে — Math.max(0, ...) দিয়ে লস লুকিয়ে রাখা হিসাবের ভুল
+  const grossProfit = totalSalesRevenue - totalPurchasesCost;
   const netProfit = grossProfit - totalOperatingExpenses - totalDamageLoss;
 
   return {

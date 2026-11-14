@@ -87,7 +87,8 @@ export function calculateNetProfit({
       
       const pId = item.id || item.productId;
       const catalogProd = products.find((p: any) => p.id === pId);
-      const buyCost = Number(catalogProd?.cost || item.cost || 0);
+      // FIX: ক্যাটালগে খরচের ফিল্ড costPrice — আগে শুধু .cost দেখাত, ফলে COGS=০ হয়ে মুনাফা বাড়ত
+      const buyCost = Number(catalogProd?.costPrice || catalogProd?.cost || item.cost || 0);
 
       totalSalesRevenue += qty * sellPrice;
       totalCOGS += qty * buyCost;
@@ -112,7 +113,8 @@ export function calculateNetProfit({
       const sellPrice = Number(item.price || 0);
       
       const catalogProd = products.find((p: any) => p.id === item.productId);
-      const buyCost = Number(catalogProd?.cost || item.cost || 0);
+      // FIX: costPrice fallback (POS-এর মতোই)
+      const buyCost = Number(catalogProd?.costPrice || catalogProd?.cost || item.cost || 0);
 
       totalSalesRevenue += netSold * sellPrice;
       totalCOGS += netSold * buyCost;
@@ -120,7 +122,8 @@ export function calculateNetProfit({
   });
 
   // Calculate Sales Margin
-  const salesMargin = Math.max(0, totalSalesRevenue - totalCOGS);
+  // FIX: ক্ষতি লুকানো হতো না — নেগেটিভ মার্জিন থাকলে সেটাই দেখাবে
+  const salesMargin = totalSalesRevenue - totalCOGS;
 
   // C) Sub Depot Commission (represented by totalSubDbProfit in shipments)
   const subDepotCommission = filteredSubDbShipments.reduce((sum, s) => {
