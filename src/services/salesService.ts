@@ -78,25 +78,43 @@ export async function handleCompleteSale(salePayload: CompleteSalePayload, compa
   };
   batch.set(salesRef, saleData);
 
-  // 2. Write to Customer Ledger (transactions)
+  // 2. Write to Customer Ledger (FIXED)
+  //    - supplier-split entries with the same ID scheme as sync ({saleId}_{supplierId})
+  //      -> syncExistingToTransactions will no longer create duplicates (already in existingIds)
+  //    - partyId/partyType fields added (ledger engine reads these), supplierId included
   if (salePayload.customerId && salePayload.customerId !== "cash") {
-    const custTxRef = doc(collection(db, "transactions"));
-    batch.set(custTxRef, {
-      id: custTxRef.id,
-      companyId: saleData.companyId,
-      date: dateStr,
-      entityId: salePayload.customerId,
-      entityName: salePayload.customerName,
-      entityType: "customer",
-      refId: saleId,
-      type: "sale",
-      description: `বিক্রয় চালান #${saleId.slice(0, 6)} - কাস্টমার: ${salePayload.customerName}`,
-      amount: salePayload.total,
-      paidAmount: salePayload.paidAmount,
-      dueAmount: salePayload.dueAmount,
-      createdBy: salePayload.createdBy || "Staff",
-      createdAt: serverTimestamp()
+    const supplierTotals: Record<string, number> = {};
+    salePayload.items.forEach(item => {
+      const sId = (item as any).supplierId || "all";
+      const val = item.total ?? ((item.cartons * (item.cartoonSize || 1) + (item.pieces || 0)) * item.rate);
+      supplierTotals[sId] = (supplierTotals[sId] || 0) + val;
     });
+    const saleTotal = salePayload.total || saleTotals.netTotal;
+    const calcTotal = Object.values(supplierTotals).reduce((a, b) => a + b, 0);
+    const entries = calcTotal > 0 && Object.keys(supplierTotals).length > 0
+      ? Object.entries(supplierTotals).map(([sId, val]) => ({ sId, amount: saleTotal * (val / calcTotal) }))
+      : [{ sId: "all", amount: saleTotal }];
+
+    for (const { sId, amount } of entries) {
+      const txId = `${saleId}_${sId}`;
+      batch.set(doc(db, "transactions", txId), {
+        id: txId,
+        companyId: saleData.companyId,
+        date: dateStr,
+        partyId: salePayload.customerId,
+        partyType: "customer",
+        entityId: salePayload.customerId,   // backward-compat for older views
+        entityType: "customer",
+        entityName: salePayload.customerName,
+        refId: saleId,
+        type: "sale",
+        amount: Math.round(amount * 100) / 100,
+        supplierId: sId,
+        description: `বিক্রয় চালান #${saleId.slice(0, 6)} — ${salePayload.customerName}`,
+        createdBy: salePayload.createdBy || "Staff",
+        createdAt: serverTimestamp()
+      });
+    }
   }
 
   // 3. Write to Damage Stock (if damaged items returned/recorded in sale)
@@ -133,6 +151,9 @@ export async function handleCompleteSale(salePayload: CompleteSalePayload, compa
       freePieces: saleTotals.totalFreePieces,
       discountAmount: saleTotals.totalItemDiscounts,
       entityId: salePayload.customerId || "cash",
+      supplierId: [...new Set(salePayload.items.map(i => (i as any).supplierId).filter(Boolean))].length === 1
+        ? salePayload.items.map(i => (i as any).supplierId).filter(Boolean)[0]
+        : "all",
       createdBy: salePayload.createdBy || "Staff",
       createdAt: serverTimestamp()
     });

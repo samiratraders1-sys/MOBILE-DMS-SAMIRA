@@ -82,8 +82,11 @@ export const calculateTotalInvestment = (params: InvestmentParams) => {
   let managerCash = 0;
   const cashTxs = transactions.filter(t => t.partyType === 'CASH_ACCOUNT');
   cashTxs.forEach(t => {
-    if (['COLLECTION', 'PAYMENT', 'CREDIT'].includes(t.type)) managerCash += t.amount;
-    else if (['TRANSFER', 'EXPENSE', 'DEBIT'].includes(t.type)) managerCash -= t.amount;
+    // FIX: unapproved (pending) collections excluded; PAYMENT is now cash-out (-);
+    // CLAIM_RECEIVED (claim money received) is cash-in (+)
+    if (t.approved === false) return;
+    if (['COLLECTION', 'CLAIM_RECEIVED', 'CREDIT'].includes(t.type)) managerCash += t.amount;
+    else if (['PAYMENT', 'TRANSFER', 'EXPENSE', 'DEBIT'].includes(t.type)) managerCash -= t.amount;
   });
 
   // 6. Unapproved Supplier Claims (Pending Supplier Adjustments)
@@ -101,8 +104,10 @@ export const calculateTotalInvestment = (params: InvestmentParams) => {
   let totalSupplierPayables = 0;
   const supplierTxs = transactions.filter(t => t.partyType === 'SUPPLIER');
   supplierTxs.forEach(t => {
-    if (['PURCHASE', 'CREDIT'].includes(t.type)) totalSupplierPayables += t.amount;
-    else if (['PAYMENT', 'RETURN', 'DISCOUNT', 'DEBIT'].includes(t.type)) totalSupplierPayables -= t.amount;
+    if (t.approved === false) return;
+    // FIX: new claim ledger types included - claims reduce supplier payable (create receivable)
+    if (['PURCHASE', 'CREDIT', 'CLAIM_RECEIVED'].includes(t.type)) totalSupplierPayables += t.amount;
+    else if (['PAYMENT', 'RETURN', 'DISCOUNT', 'DEBIT', 'FREE_CLAIM', 'PROMO_CLAIM', 'DAMAGE_CLAIM', 'PRICE_SUPPORT'].includes(t.type)) totalSupplierPayables -= t.amount;
   });
 
   const grossAssets = totalInventoryValuation 
@@ -110,8 +115,13 @@ export const calculateTotalInvestment = (params: InvestmentParams) => {
                     + totalSubDbReceivables 
                     + totalStaffDues 
                     + Math.max(0, managerCash)
-                    + pendingSupplierClaimsVal 
+                    + supplierReceivables
                     + totalAssetsAndAdvances;
+
+  // FIX: claim receivable now comes from the ledger itself (negative supplier balance =
+  // our claim against the company). pendingSupplierClaimsVal removed from grossAssets
+  // to avoid double counting with the new claim ledger entries.
+  const supplierReceivables = Math.max(0, -totalSupplierPayables);
 
   const netInvestment = grossAssets - Math.max(0, totalSupplierPayables);
 

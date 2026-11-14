@@ -51,12 +51,13 @@ export function buildTransactionIndex(transactions: TransactionDoc[]): Transacti
     const t = transactions[i];
     if (!t) continue;
 
-    // Index by partyId
-    if (t.partyId) {
-      let partyList = byPartyId.get(t.partyId);
+    // FIX: fall back to entityId when partyId is missing (legacy entries)
+    const pid = t.partyId || (t as any).entityId;
+    if (pid) {
+      let partyList = byPartyId.get(pid);
       if (!partyList) {
         partyList = [];
-        byPartyId.set(t.partyId, partyList);
+        byPartyId.set(pid, partyList);
       }
       partyList.push(t);
     }
@@ -136,24 +137,39 @@ export function calculateLedger(
 
   // 2. Calculate overall balance and per-transaction logs
   let runningBal = initialOpeningBalance;
+  // FIX: normalize both type formats (legacy lowercase + new uppercase from settlementEngine)
+  const normType = (t: any): string => {
+    const raw = String(t.type || "");
+    const upper = raw.toUpperCase();
+    if (["SALE", "DUE", "SHORT", "DEBIT"].includes(upper)) return "sale";
+    if (["PAYMENT_IN", "COLLECTION"].includes(upper)) return "payment_in";
+    if (["PAYMENT_OUT", "PAYMENT"].includes(upper)) return "payment_out";
+    if (upper === "RETURN") return "return";
+    if (upper === "PURCHASE") return "purchase";
+    if (upper === "OPENING") return "opening";
+    return raw.toLowerCase();
+  };
+  const pt = String(partyType).toLowerCase();
+
   const logs = sortedTx.map(t => {
+    const tt = normType(t);
     let effect = 0;
-    if (partyType === "customer") {
-      if (t.type === "sale" || t.type === "payment_out" || (t.type === "opening" && t.amount > 0)) {
+    if (pt === "customer") {
+      if (tt === "sale" || tt === "payment_out" || (tt === "opening" && t.amount > 0)) {
         effect = t.amount;
-      } else if (t.type === "payment_in" || t.type === "return" || (t.type === "opening" && t.amount < 0)) {
+      } else if (tt === "payment_in" || tt === "return" || (tt === "opening" && t.amount < 0)) {
         effect = -t.amount;
       }
-    } else if (partyType === "supplier") {
-      if (t.type === "purchase" || t.type === "payment_in" || (t.type === "opening" && t.amount > 0)) {
+    } else if (pt === "supplier") {
+      if (tt === "purchase" || tt === "payment_in" || (tt === "opening" && t.amount > 0)) {
         effect = t.amount;
-      } else if (t.type === "payment_out" || t.type === "return" || (t.type === "opening" && t.amount < 0)) {
+      } else if (tt === "payment_out" || tt === "return" || (tt === "opening" && t.amount < 0)) {
         effect = -t.amount;
       }
-    } else if (partyType === "staff") {
-      if (t.type === "sale" || t.type === "payment_in") {
+    } else if (pt === "staff") {
+      if (tt === "sale" || tt === "payment_in") {
         effect = t.amount;
-      } else if (t.type === "payment_out" || t.type === "purchase") {
+      } else if (tt === "payment_out" || tt === "purchase") {
         effect = -t.amount;
       }
     }
@@ -180,26 +196,27 @@ export function calculateLedger(
   }
 
   // Fast aggregation over only this customer's pre-filtered transactions
-  if (partyType === "customer") {
+  if (pt === "customer") {
     sortedTx.forEach(t => {
       const sId = t.supplierId || "all";
       if (!supplierBreakdown[sId]) {
         supplierBreakdown[sId] = { sales: 0, payments: 0, returns: 0, due: 0 };
       }
 
-      if (t.type === "sale") {
+      const tt = normType(t);
+      if (tt === "sale") {
         supplierBreakdown[sId].sales += t.amount;
         supplierBreakdown[sId].due += t.amount;
-      } else if (t.type === "payment_in") {
+      } else if (tt === "payment_in") {
         supplierBreakdown[sId].payments += t.amount;
         supplierBreakdown[sId].due -= t.amount;
-      } else if (t.type === "return") {
+      } else if (tt === "return") {
         supplierBreakdown[sId].returns += t.amount;
         supplierBreakdown[sId].due -= t.amount;
-      } else if (t.type === "payment_out") {
+      } else if (tt === "payment_out") {
         supplierBreakdown[sId].payments -= t.amount;
         supplierBreakdown[sId].due += t.amount;
-      } else if (t.type === "opening") {
+      } else if (tt === "opening") {
         supplierBreakdown[sId].due += t.amount;
       }
     });
