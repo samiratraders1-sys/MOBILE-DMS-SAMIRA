@@ -29,7 +29,7 @@ export interface ProfitLossParams {
  * Total Investment Engine Calculation
  * Total Investment = Inventory Valuation (Fresh + Damage at cost) 
  *                   + Sub DB Receivables + Customer Dues + Manager Balance 
- *                   + DSR Dues + SR Dues + Unclaimed Free/Discounts + Unapproved Supplier Claims 
+ *                   + DSR Dues + SR Dues + Claim Receivables (from ledger) 
  *                   + Security Deposits + Furniture & Transport + Office Advance 
  *                   - Supplier/Customer Payables
  */
@@ -89,7 +89,8 @@ export const calculateTotalInvestment = (params: InvestmentParams) => {
     else if (['PAYMENT', 'TRANSFER', 'EXPENSE', 'DEBIT'].includes(t.type)) managerCash -= t.amount;
   });
 
-  // 6. Unapproved Supplier Claims (Pending Supplier Adjustments)
+  // 6. Unapproved Supplier Claims (Pending Supplier Adjustments) - kept as a report reference only;
+  //    the investment calculation uses the ledger-based supplierReceivables below to avoid double counting
   const pendingSupplierClaimsVal = claims
     .filter(c => c.status === 'pending')
     .reduce((sum, c) => sum + (c.amount || c.totalAmount || 0), 0);
@@ -110,6 +111,12 @@ export const calculateTotalInvestment = (params: InvestmentParams) => {
     else if (['PAYMENT', 'RETURN', 'DISCOUNT', 'DEBIT', 'FREE_CLAIM', 'PROMO_CLAIM', 'DAMAGE_CLAIM', 'PRICE_SUPPORT'].includes(t.type)) totalSupplierPayables -= t.amount;
   });
 
+  // FIX: claim receivable now comes from the ledger itself (negative supplier balance =
+  // our claim against the company). pendingSupplierClaimsVal is NOT added to grossAssets
+  // to avoid double counting with the new claim ledger entries.
+  // NOTE: declared before grossAssets (was referenced before declaration in the previous commit).
+  const supplierReceivables = Math.max(0, -totalSupplierPayables);
+
   const grossAssets = totalInventoryValuation 
                     + totalCustomerDues 
                     + totalSubDbReceivables 
@@ -117,11 +124,6 @@ export const calculateTotalInvestment = (params: InvestmentParams) => {
                     + Math.max(0, managerCash)
                     + supplierReceivables
                     + totalAssetsAndAdvances;
-
-  // FIX: claim receivable now comes from the ledger itself (negative supplier balance =
-  // our claim against the company). pendingSupplierClaimsVal removed from grossAssets
-  // to avoid double counting with the new claim ledger entries.
-  const supplierReceivables = Math.max(0, -totalSupplierPayables);
 
   const netInvestment = grossAssets - Math.max(0, totalSupplierPayables);
 
@@ -134,6 +136,7 @@ export const calculateTotalInvestment = (params: InvestmentParams) => {
     totalStaffDues,
     managerCash,
     pendingSupplierClaimsVal,
+    supplierReceivables,
     depositMoney,
     furnitureTransport,
     officeGodownAdvance,
@@ -191,4 +194,3 @@ export const calculateNetProfitLoss = (params: ProfitLossParams) => {
     netProfit
   };
 };
-
