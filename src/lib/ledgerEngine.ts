@@ -21,7 +21,8 @@ export type LedgerType =
   | 'DAMAGE_CLAIM'    // ড্যামেজ রিটার্ন ক্লেইম
   | 'PRICE_SUPPORT'   // প্রাইস সাপোর্ট / অন্যান্য অ্যাডজাস্টমেন্ট ক্লেইম
   | 'CLAIM_RECEIVED'  // কোম্পানি ক্লেইমের টাকা/পণ্য পরিশোধ করেছে
-  | 'ADVANCE';        // DSR/স্টাফ বেশি টাকা জমা দিয়েছে (কোম্পানির কাছে তার পাওনা)
+  | 'ADVANCE'
+  | 'ADVANCE_USED';        // DSR/স্টাফ বেশি টাকা জমা দিয়েছে (কোম্পানির কাছে তার পাওনা)
 
 export type PartyType = 'CUSTOMER' | 'SUPPLIER' | 'STAFF' | 'CASH_ACCOUNT' | 'SUB_DB';
 
@@ -68,7 +69,7 @@ const EFFECTS: Record<PartyType, { pos: LedgerType[]; neg: LedgerType[] }> = {
   // স্টাফ/DSR: শর্ট/বাকি বাড়ে; কালেকশন/বেতন/ট্রান্সফার/অ্যাডভান্স কমায়
   // 'EXPENSE' এখানে ইচ্ছাকৃতভাবে নেই — খরচ আগেই প্রদেয় থেকে কাটা, আবার কাটলে ডাবল হতো
   STAFF: {
-    pos: ['SHORT', 'DUE', 'DEBIT'],
+    pos: ['SHORT', 'DUE', 'DEBIT', 'ADVANCE_USED'],
     neg: ['COLLECTION', 'SALARY', 'TRANSFER', 'CREDIT', 'PAYMENT', 'ADVANCE'],
   },
   // ক্যাশ অ্যাকাউন্ট: টাকা ঢুকলে +, দিলে −
@@ -83,6 +84,24 @@ const EFFECTS: Record<PartyType, { pos: LedgerType[]; neg: LedgerType[] }> = {
  * নিয়ম: approved === false (অনুমোদন-বাকি) এন্ট্রি কোনো লেজারেই পড়বে না —
  * অনুমোদনের পর সব লেজার একসাথে আপডেট হবে (ক্যাশ বই ও DSR লেজার সবসময় মিলবে)।
  */
+// লেগেসি ডেটার ছোট হাতের টাইপগুলো ক্যানোনিক্যাল বড় হাতের টাইপে নেয়া
+// (পুরনো sync লেখে 'sale'/'payment_in'/'payment_out', নতুন ইঞ্জিন লেখে বড় হাতের —
+//  না মিলালে পুরনো এন্ট্রির ইফেক্ট ০ ধরা হতো = ব্যালেন্স গায়েব)
+const TYPE_ALIASES: Record<string, LedgerType> = {
+  SALE: 'SALES',
+  PAYMENT_IN: 'COLLECTION',
+  PAYMENT_OUT: 'PAYMENT',
+  SHORTAGE: 'SHORT',
+  FREE: 'FREE_CLAIM',
+  PROMO: 'PROMO_CLAIM',
+  DAMAGE: 'DAMAGE_CLAIM',
+};
+
+export const normalizeLedgerType = (raw: any): LedgerType => {
+  const up = String(raw || '').toUpperCase();
+  return TYPE_ALIASES[up] || (up as LedgerType);
+};
+
 export const getLedgerEffect = (
   t: Pick<LedgerTransaction, 'type' | 'amount' | 'approved'>,
   partyType: PartyType
@@ -90,8 +109,9 @@ export const getLedgerEffect = (
   if (t.approved === false) return 0;
   const rule = EFFECTS[partyType];
   if (!rule) return 0;
-  if (rule.pos.includes(t.type)) return t.amount;
-  if (rule.neg.includes(t.type)) return -t.amount;
+  const type = normalizeLedgerType(t.type);
+  if (rule.pos.includes(type)) return t.amount;
+  if (rule.neg.includes(type)) return -t.amount;
   return 0;
 };
 
@@ -117,7 +137,7 @@ export const calculateRunningBalance = (
   return chronological.map(t => {
     const effect = getLedgerEffect(t, partyType);
     balance += effect;
-    return { ...t, runningBalance: balance };
+    return { ...t, type: normalizeLedgerType(t.type), runningBalance: balance };
   });
 };
 
@@ -183,15 +203,16 @@ export const getSupplierClaimReceivable = (
   return transactions
     .filter(t =>
       t.partyType === 'SUPPLIER' &&
-      claimTypes.includes(t.type) &&
+      claimTypes.includes(normalizeLedgerType(t.type)) &&
       (!supplierId || t.partyId === supplierId)
     )
     .reduce((sum, t) => sum + t.amount, 0)
     - transactions
       .filter(t =>
         t.partyType === 'SUPPLIER' &&
-        t.type === 'CLAIM_RECEIVED' &&
+        normalizeLedgerType(t.type) === 'CLAIM_RECEIVED' &&
         (!supplierId || t.partyId === supplierId)
       )
       .reduce((sum, t) => sum + t.amount, 0);
 };
+

@@ -33,7 +33,7 @@ export interface AssignedItem {
   supplierId?: string;
 }
 export interface ReturnItem { productId: string; productName?: string; qty: number; unitPrice: number; unitCost: number; }
-export interface DamageItem extends ReturnItem { supplierId?: string; supplierName?: string; reason?: string; }
+export interface DamageItem extends ReturnItem { claimRate?: number; supplierId?: string; supplierName?: string; reason?: string; }
 export interface FreeItem {
   productId: string; productName?: string;
   qty: number;
@@ -59,6 +59,7 @@ export interface DSRSettlementInput {
   customerDues: CustomerDue[];
   specialDiscount?: number;     // স্পেশাল ডিসকাউন্ট — ক্লেইম বিলে যাবে না, সরাসরি খরচ
   collectedCash: number;
+  openingAdvance?: number;      // FIX: আগের সেটেলমেন্টে জমা হওয়া DSR অ্যাডভান্স — এবার এর থেকে আগে কাটা হবে
   managerId: string; managerName?: string;
 }
 
@@ -78,6 +79,8 @@ export interface SettlementTotals {
   netCashPayable: number;     // DSR প্রদেয়
   shortAmount: number;        // + হলে DSR-এর বাকি, − হলে অ্যাডভান্স
   shortDue: number;           // DSR শর্ট (>= 0)
+  openingAdvanceVal: number;  // পুরনো অ্যাডভান্স (ইনপুট)
+  advanceUsedVal: number;     // এবার পুরনো অ্যাডভান্স থেকে যত কাটা হলো
   advanceAmount: number;      // DSR অ্যাডভান্স (>= 0)
 }
 
@@ -105,15 +108,21 @@ export const computeSettlementTotals = (input: DSRSettlementInput): SettlementTo
     damageVal + freeDeductionVal + totalDiscountsVal + totalExpensesVal + specialDiscountVal + totalCustomerDuesVal
   );
   const netCashPayable = roundCurrency(netStockOutVal - totalDeductions);
-  const shortAmount = roundCurrency(netCashPayable - (input.collectedCash || 0));
+  // FIX: পুরনো অ্যাডভান্স থাকলে আগে সেটাই খরচ হবে, তারপর এবারের জমা
+  const openingAdvanceVal = roundCurrency(input.openingAdvance || 0);
+  const cashAvailable = roundCurrency((input.collectedCash || 0) + openingAdvanceVal);
+  const shortAmount = roundCurrency(netCashPayable - cashAvailable);
   const shortDue = Math.max(0, shortAmount);
+  const advanceUsedVal = openingAdvanceVal > 0
+    ? roundCurrency(Math.min(openingAdvanceVal, Math.max(0, netCashPayable - (input.collectedCash || 0))))
+    : 0; // পুরনো অ্যাডভান্সের যতটা অংশ এবারের প্রদেয় মেটাতে লাগলো
   const advanceAmount = Math.max(0, -shortAmount); // FIX #3: বেশি জমা = DSR অ্যাডভান্স
 
   return {
     grossAssignedVal, freshReturnVal, netStockOutVal,
     damageVal, freeDeductionVal, freeClaimVal, damageClaimVal,
     totalDiscountsVal, totalExpensesVal, specialDiscountVal, totalCustomerDuesVal,
-    totalDeductions, netCashPayable, shortAmount, shortDue, advanceAmount,
+    totalDeductions, netCashPayable, shortAmount, shortDue, advanceAmount, openingAdvanceVal, advanceUsedVal,
   };
 };
 
@@ -240,6 +249,18 @@ export const processMasterDSRSettlement = async (input: DSRSettlementInput) => {
   }
 
   // 6) জমাকৃত ক্যাশ — ম্যানেজারের ক্যাশ অ্যাকাউন্টে, অনুমোদন-বাকি (approved:false)
+  // 5b) পুরনো অ্যাডভান্স খরচ — আগের অ্যাডভান্স থেকে যতটা এবারের প্রদেয় মেটানো হলো (রিকোয়ারমেন্ট §11)
+  if (totals.advanceUsedVal > 0) {
+    await postTx(`${prefix}_ADV_USED`, {
+      ...base,
+      partyId: input.dsrId,
+      partyType: 'STAFF',
+      type: 'ADVANCE_USED',
+      amount: totals.advanceUsedVal,
+      description: `পুরনো অ্যাডভান্স খরচ — ৳${totals.advanceUsedVal} অ্যাডভান্স থেকে কাটা হলো — DSR: ${input.dsrName}`,
+    });
+  }
+
   if (input.collectedCash > 0) {
     await postTx(`${prefix}_CASH`, {
       ...base,
@@ -260,3 +281,4 @@ export const processMasterDSRSettlement = async (input: DSRSettlementInput) => {
 
   return { settlementId: input.summaryId, totals };
 };
+

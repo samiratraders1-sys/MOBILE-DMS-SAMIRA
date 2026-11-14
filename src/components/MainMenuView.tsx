@@ -14,6 +14,7 @@ const menuItems = [
   { name: "Collection Management", label: "কালেকশন ম্যানেজমেন্ট", icon: DollarSign, view: "payment-history" },
   { name: "SR/DSR/DM Management", label: "SR/DSR/DM ম্যানেজমেন্ট", icon: BookOpen, view: "dsr-portal" },
   { name: "Reports Management", label: "রিপোর্টস ম্যানেজমেন্ট", icon: BarChart, view: "reports" },
+  { name: "Supplier Claim Bill", label: "সাপ্লায়ার ক্লেইম বিল", icon: FileText, view: "claim-bill" },
 ];
 
 export default function MainMenuView({ setActiveView }: { setActiveView: (view: string) => void }) {
@@ -37,3 +38,4 @@ export default function MainMenuView({ setActiveView }: { setActiveView: (view: 
     </div>
   );
 }
+

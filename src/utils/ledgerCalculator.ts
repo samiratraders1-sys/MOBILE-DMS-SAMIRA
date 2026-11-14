@@ -165,17 +165,26 @@ export function calculateLedger(
         effect = t.amount;
       } else if (tt === "payment_out" || tt === "return" || (tt === "opening" && t.amount < 0)) {
         effect = -t.amount;
+      } else if (["free_claim", "promo_claim", "damage_claim", "price_support"].includes(tt)) {
+        effect = -t.amount; // সাপ্লায়ারের কাছে আমাদের ক্লেইম (রিসিভেবল) — ব্যালেন্স কমায়
+      } else if (tt === "claim_received") {
+        effect = t.amount; // কোম্পানি ক্লেইম পরিশোধ করেছে
       }
     } else if (pt === "staff") {
       if (tt === "sale" || tt === "payment_in") {
         effect = t.amount;
       } else if (tt === "payment_out" || tt === "purchase") {
         effect = -t.amount;
+      } else if (tt === "advance") {
+        effect = -t.amount; // DSR অ্যাডভান্স — কোম্পানির কাছে DSR-এর পাওনা
+      } else if (tt === "advance_used") {
+        effect = t.amount; // অ্যাডভান্স থেকে খরচ হলো
       }
     }
     runningBal += effect;
     return {
       ...t,
+      type: tt, // display-normalized lowercase type — LedgerView-এর Debit/Credit শনাক্তকরণ যেন uppercase নতুন এন্ট্রিতেও কাজ করে
       runningBalance: runningBal,
       effect
     };
@@ -555,3 +564,4 @@ export function checkTransactionDrift(
     hasDrift: drifts.length > 0
   };
 }
+

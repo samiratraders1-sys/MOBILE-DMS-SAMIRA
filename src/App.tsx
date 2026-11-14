@@ -56,6 +56,7 @@ import OrderManagementPage from "./pages/OrderManagement";
 import { handleCompleteSale } from "./services/salesService";
 import ExpenseLedgerView from "./components/ExpenseLedgerView";
 import SupplierClaimsView from "./components/SupplierClaimsView";
+import ClaimBillView from "./components/ClaimBillView";
 import CustomerCollectionModule from "./components/CustomerCollectionModule";
 import AuditComplianceView from "./components/AuditComplianceView";
 import DocumentScannerModal from "./components/DocumentScannerModal";
@@ -1778,6 +1779,14 @@ export default function App() {
             userEmail={user?.email || ""}
           />
         );
+      case "claim-bill":
+        return (
+          <ClaimBillView
+            transactions={transactions.data}
+            suppliers={suppliers.data}
+            role={role}
+          />
+        );
       case "payment-history":
         return (
           <ReportsView 
@@ -2573,4 +2582,5 @@ function Placeholder({ title, icon }: { title: string, icon: string }) {
     </div>
   );
 }
+
 
