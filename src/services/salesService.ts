@@ -89,7 +89,7 @@ export async function handleCompleteSale(salePayload: CompleteSalePayload, compa
       const val = item.total ?? ((item.cartons * (item.cartoonSize || 1) + (item.pieces || 0)) * item.rate);
       supplierTotals[sId] = (supplierTotals[sId] || 0) + val;
     });
-    const saleTotal = salePayload.total || saleTotals.netTotal;
+    const saleTotal = salePayload.total || saleTotals.finalTotal || saleTotals.netTotal; // ট্যাক্সসহ প্রদেয়
     const calcTotal = Object.values(supplierTotals).reduce((a, b) => a + b, 0);
     const entries = calcTotal > 0 && Object.keys(supplierTotals).length > 0
       ? Object.entries(supplierTotals).map(([sId, val]) => ({ sId, amount: saleTotal * (val / calcTotal) }))
