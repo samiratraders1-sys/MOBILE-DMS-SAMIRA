@@ -12,6 +12,19 @@ interface PnLProps {
   subDbShipments?: any[];
 }
 
+// এই ক্যাটাগরিগুলো আয় নয় — কাস্টমারের বাকির কালেকশন (বিক্রয়ে আগেই গোনা) বা শর্ট-সমন্বয়
+// এগুলো আয় হিসেবে গুনলে মুনাফা ডাবল দেখায় (FIX: double-counting)
+const NON_INCOME_CATEGORIES = [
+  "DSR Route Sales Collection",
+  "Customer Collection",
+  "কাস্টমার কালেকশন",
+  "Manager Salary Advance",
+  "Recoverable Debt",
+  "Sub-DB Collection",
+  "Supplier Payment",
+  "সাপ্লায়ার পেমেন্ট"
+];
+
 // Helper to calculate PnL for a specific range
 const calculatePnLForRange = (sales: any[], payments: any[], summaries: any[], products: any[], subDbShipments: any[], startDate: string, endDate: string) => {
     // Standard POS sales filtering (approved only)
@@ -103,9 +116,10 @@ const calculatePnLForRange = (sales: any[], payments: any[], summaries: any[], p
       if (p.type === 'out') {
         expenseByCategory[p.category || "অন্যান্য খরচ"] = (expenseByCategory[p.category || "অন্যান্য খরচ"] || 0) + amount;
       } else if (p.type === 'in') {
-        // Skip Sub-DB Collection since that is cash inflow of balance due, not raw profit/income itself
-        if (p.category === "Sub-DB Collection") return;
-        incomeByCategory[p.category || "অন্যান্য সাধারণ আয়"] = (incomeByCategory[p.category || "অন্যান্য সাধারণ আয়"] || 0) + amount;
+        // FIX (double-counting): কাস্টমার/রুট কালেকশন ও শর্ট-সমন্বয় আয় নয় —
+        // এই টাকা বিক্রয় রেভিনিউতে আগেই গোনা হয়েছে; আবার গুনলে মুনাফা বাড়া-চোরা দেখায়
+        if (NON_INCOME_CATEGORIES.includes(p.category)) return;
+        incomeByCategory[p.category || "অন্যান্য সাধারণ আয়"] = (incomeByCategory[p.category || "অন্যান্য সাধারণ আয়"] || 0) + amount;
       }
     });
 
@@ -118,13 +132,13 @@ const calculatePnLForRange = (sales: any[], payments: any[], summaries: any[], p
     }, 0);
 
     if (totalSubDbProfit > 0) {
-      incomeByCategory["সাব-ডিবি ইনকাম (কার্টুন কমিশন ও গাড়ি ভাড়া)"] = totalSubDbProfit;
+      incomeByCategory["সাব-ডিবি ইনকাম (কার্টুন কমিশন ও গাড়ি ভাড়া)"] = totalSubDbProfit;
     }
 
     const totalExpenses = Object.values(expenseByCategory).reduce((a, b) => a + b, 0);
     const totalOthersIncome = Object.values(incomeByCategory).reduce((a, b) => a + b, 0);
 
-    // Sales Gross Profit (পণ্য বিক্রয় লাভ)
+    // Sales Gross Profit (পণ্য বিক্রয় লাভ)
     const salesGrossProfit = totalSalesRevenue - totalCOGS;
 
     // Total Revenue (Gross Profit + Others Income)
@@ -172,16 +186,16 @@ export default function ProfitLossView({ sales = [], purchases = [], payments = 
   const handleDownloadExcel = () => {
     const headers = ["বিবরণ (Particulars)", "পরিমাণ (Amount)"];
     const rows = [
-      ["পণ্য বিক্রয়জনিত গ্রস লাভ (Gross Profit)", pnlSummary.salesGrossProfit],
-      ["নীট বিক্রয় (Net Sales)", pnlSummary.salesRevenue],
-      ["ক্রয়মূল্য (COGS)", pnlSummary.cogs],
-      ["অন্যান্য সাধারণ আয় (Other Incomes)", pnlSummary.totalOthersIncome],
+      ["পণ্য বিক্রয়জনিত গ্রস লাভ (Gross Profit)", pnlSummary.salesGrossProfit],
+      ["নীট বিক্রয় (Net Sales)", pnlSummary.salesRevenue],
+      ["ক্রয়মূল্য (COGS)", pnlSummary.cogs],
+      ["অন্যান্য সাধারণ আয় (Other Incomes)", pnlSummary.totalOthersIncome],
       ...Object.entries(pnlSummary.income).map(([cat, val]) => [`  - ${cat}`, val]),
-      ["মোট পরিচালন ব্যয় (Total Expenses)", pnlSummary.totalExpenses],
+      ["মোট পরিচালন ব্যয় (Total Expenses)", pnlSummary.totalExpenses],
       ...Object.entries(pnlSummary.expenses).map(([cat, val]) => [`  - ${cat}`, val]),
       ["মোট ফ্রি পণ্য দেওয়া হয়েছে (Free Qty)", pnlSummary.freeQty],
       ["সমতুল্য বাজার মূল্য (Free Value)", pnlSummary.freeVal],
-      ["চূড়ান্ত লাভ-ক্ষতি (Net Profit/Loss)", pnlSummary.netProfit]
+      ["চূড়ান্ত লাভ-ক্ষতি (Net Profit/Loss)", pnlSummary.netProfit]
     ];
 
     const csvContent = "data:text/csv;charset=utf-8,\uFEFF" + [headers, ...rows].map(e => e.map(val => `"${val}"`).join(",")).join("\n");
@@ -196,21 +210,21 @@ export default function ProfitLossView({ sales = [], purchases = [], payments = 
 
   const handleWhatsAppShare = () => {
     let text = `📊 *লাভ-ক্ষতি রিপোর্ট (Profit & Loss)*\n`;
-    text += `📅 পিরিয়ড: ${startDate} থেকে ${endDate}\n`;
+    text += `📅 পিরিয়ড: ${startDate} থেকে ${endDate}\n`;
     text += `━━━━━━━━━━━━━━━━━━━━━\n`;
-    text += `💰 *পণ্য বিক্রয়জনিত গ্রস লাভ:* ${formatCurrency(pnlSummary.salesGrossProfit)}\n`;
-    text += `   - নীট বিক্রয়: ${formatCurrency(pnlSummary.salesRevenue)}\n`;
-    text += `   - ক্রয়মূল্য (COGS): ${formatCurrency(pnlSummary.cogs)}\n`;
-    text += `✨ *অন্যান্য সাধারণ আয়:* ${formatCurrency(pnlSummary.totalOthersIncome)}\n`;
+    text += `💰 *পণ্য বিক্রয়জনিত গ্রস লাভ:* ${formatCurrency(pnlSummary.salesGrossProfit)}\n`;
+    text += `   - নীট বিক্রয়: ${formatCurrency(pnlSummary.salesRevenue)}\n`;
+    text += `   - ক্রয়মূল্য (COGS): ${formatCurrency(pnlSummary.cogs)}\n`;
+    text += `✨ *অন্যান্য সাধারণ আয়:* ${formatCurrency(pnlSummary.totalOthersIncome)}\n`;
     Object.entries(pnlSummary.income).forEach(([cat, val]) => {
       text += `   - ${cat}: ${formatCurrency(val as number)}\n`;
     });
-    text += `🛑 *মোট পরিচালন ব্যয়:* -${formatCurrency(pnlSummary.totalExpenses)}\n`;
+    text += `🛑 *মোট পরিচালন ব্যয়:* -${formatCurrency(pnlSummary.totalExpenses)}\n`;
     Object.entries(pnlSummary.expenses).forEach(([cat, val]) => {
       text += `   - ${cat}: -${formatCurrency(val as number)}\n`;
     });
     text += `━━━━━━━━━━━━━━━━━━━━━\n`;
-    text += `📈 *চূড়ান্ত লাভ-ক্ষতি (Net Profit):* ${formatCurrency(pnlSummary.netProfit)}\n`;
+    text += `📈 *চূড়ান্ত লাভ-ক্ষতি (Net Profit):* ${formatCurrency(pnlSummary.netProfit)}\n`;
     
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
   };
@@ -224,7 +238,7 @@ export default function ProfitLossView({ sales = [], purchases = [], payments = 
             <TrendingUp className="w-6 h-6 text-indigo-600" /> লাভ-ক্ষতি প্রতিবেদন (Profit & Loss)
           </h2>
           <p className="text-sm font-semibold text-gray-500 mt-1">
-            পণ্য বিক্রয় লাভ, সাধারণ আয়, বেতন ও আনুষঙ্গিক খরচ সমন্বিত হিসাব
+            পণ্য বিক্রয় লাভ, সাধারণ আয়, বেতন ও আনুষঙ্গিক খরচ সমন্বিত হিসাব
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto">
@@ -246,7 +260,7 @@ export default function ProfitLossView({ sales = [], purchases = [], payments = 
           </div>
           <button onClick={() => window.print()} className="px-4 py-2.5 bg-gray-900 text-white rounded-2xl text-xs font-bold flex items-center gap-1.5 hover:bg-black cursor-pointer"><Printer className="w-4 h-4" /> প্রিন্ট</button>
           <button onClick={handleDownloadExcel} className="px-4 py-2.5 bg-emerald-600 text-white rounded-2xl text-xs font-black flex items-center gap-1.5 hover:bg-emerald-700 cursor-pointer"><Download className="w-4 h-4" /> এক্সেল ডাউনলোড</button>
-          <button onClick={handleWhatsAppShare} className="px-4 py-2.5 bg-green-500 text-white rounded-2xl text-xs font-black flex items-center gap-1.5 hover:bg-green-600 cursor-pointer"><Share2 className="w-4 h-4" /> হোয়াটসঅ্যাপে শেয়ার</button>
+          <button onClick={handleWhatsAppShare} className="px-4 py-2.5 bg-green-500 text-white rounded-2xl text-xs font-black flex items-center gap-1.5 hover:bg-green-600 cursor-pointer"><Share2 className="w-4 h-4" /> হোয়াটসঅ্যাপে শেয়ার</button>
         </div>
       </div>
 
@@ -256,7 +270,7 @@ export default function ProfitLossView({ sales = [], purchases = [], payments = 
         <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-xs flex flex-col justify-between">
           <div>
             <div className="flex justify-between items-start mb-4">
-              <span className="text-xs font-bold text-gray-400 uppercase tracking-wider block">পণ্য বিক্রয়জনিত গ্রস লাভ</span>
+              <span className="text-xs font-bold text-gray-400 uppercase tracking-wider block">পণ্য বিক্রয়জনিত গ্রস লাভ</span>
               <span className="p-2 bg-emerald-50 rounded-xl text-emerald-600">
                 <ArrowUpRight className="w-5 h-5" />
               </span>
@@ -266,8 +280,8 @@ export default function ProfitLossView({ sales = [], purchases = [], payments = 
             </h3>
           </div>
           <div className="border-t border-gray-50 pt-3 mt-4 flex justify-between text-xs font-bold text-gray-500">
-            <span>নীট বিক্রয়: {formatCurrency(pnlSummary.salesRevenue)}</span>
-            <span>ক্রয়মূল্য (COGS): {formatCurrency(pnlSummary.cogs)}</span>
+            <span>নীট বিক্রয়: {formatCurrency(pnlSummary.salesRevenue)}</span>
+            <span>ক্রয়মূল্য (COGS): {formatCurrency(pnlSummary.cogs)}</span>
           </div>
         </div>
 
@@ -275,7 +289,7 @@ export default function ProfitLossView({ sales = [], purchases = [], payments = 
         <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-xs flex flex-col justify-between">
           <div>
             <div className="flex justify-between items-start mb-4">
-              <span className="text-xs font-bold text-gray-400 uppercase tracking-wider block">অন্যান্য সাধারণ আয়</span>
+              <span className="text-xs font-bold text-gray-400 uppercase tracking-wider block">অন্যান্য সাধারণ আয়</span>
               <span className="p-2 bg-blue-50 rounded-xl text-blue-600">
                 <DollarSign className="w-5 h-5" />
               </span>
@@ -285,7 +299,7 @@ export default function ProfitLossView({ sales = [], purchases = [], payments = 
             </h3>
           </div>
           <div className="border-t border-gray-50 pt-3 mt-4 text-xs font-bold text-gray-400">
-            ডিলার কমিশন, কার্টুন ও সাধারণ আয়ের সমষ্টি
+            ডিলার কমিশন, কার্টুন ও সাধারণ আয়ের সমষ্টি
           </div>
         </div>
 
@@ -293,7 +307,7 @@ export default function ProfitLossView({ sales = [], purchases = [], payments = 
         <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-xs flex flex-col justify-between">
           <div>
             <div className="flex justify-between items-start mb-4">
-              <span className="text-xs font-bold text-gray-400 uppercase tracking-wider block">মোট পরিচালন ব্যয় (বেতনসহ)</span>
+              <span className="text-xs font-bold text-gray-400 uppercase tracking-wider block">মোট পরিচালন ব্যয় (বেতনসহ)</span>
               <span className="p-2 bg-red-50 rounded-xl text-red-600">
                 <ArrowDownRight className="w-5 h-5" />
               </span>
@@ -314,12 +328,12 @@ export default function ProfitLossView({ sales = [], purchases = [], payments = 
         <div className="absolute top-0 right-0 w-80 h-80 bg-indigo-505/10 rounded-full blur-3xl -mr-20 -mt-20 pointer-events-none" />
         
         <div>
-          <span className="text-xs font-black text-indigo-400 uppercase tracking-widest">চুড়ান্ত ফলাফল (Net Profit/Loss)</span>
+          <span className="text-xs font-black text-indigo-400 uppercase tracking-widest">চুড়ান্ত ফলাফল (Net Profit/Loss)</span>
           <h2 className="text-4xl font-extrabold tracking-tighter mt-1 hover:scale-101 transition-all">
             {formatCurrency(pnlSummary.netProfit)}
           </h2>
           <p className="text-xs font-medium text-slate-400 mt-2">
-            সর্বমোট লাভ ({formatCurrency(pnlSummary.salesGrossProfit + pnlSummary.totalOthersIncome)}) থেকে পরিচালন ব্যয় বিয়োগ করার পর নিট পরিমান।
+            সর্বমোট লাভ ({formatCurrency(pnlSummary.salesGrossProfit + pnlSummary.totalOthersIncome)}) থেকে পরিচালন ব্যয় বিয়োগ করার পর নিট পরিমান।
           </p>
         </div>
 
@@ -329,7 +343,7 @@ export default function ProfitLossView({ sales = [], purchases = [], payments = 
             <HelpCircle className="w-3.5 h-3.5 text-indigo-400" />
           </div>
           <div className="flex justify-between items-center text-sm">
-            <span>মোট ফ্রি পণ্য দেওয়া হয়েছে:</span>
+            <span>মোট ফ্রি পণ্য দেওয়া হয়েছে:</span>
             <span className="font-extrabold text-indigo-300 font-mono">{pnlSummary.freeQty} টি</span>
           </div>
           <div className="flex justify-between items-center text-xs mt-1 text-slate-400">
@@ -352,7 +366,7 @@ export default function ProfitLossView({ sales = [], purchases = [], payments = 
         {/* Expenses List */}
         <div className="bg-white p-6 rounded-3xl border border-gray-150 shadow-xs">
           <h3 className="font-extrabold text-base text-gray-950 mb-4 border-b border-gray-50 pb-3 flex items-center gap-2">
-            <span className="w-1.5 h-4 bg-red-500 rounded-sm" /> ধাপে ধাপে পরিচালন ব্যয়সমূহ (Expenses & Salaries)
+            <span className="w-1.5 h-4 bg-red-500 rounded-sm" /> ধাপে ধাপে পরিচালন ব্যয়সমূহ (Expenses & Salaries)
           </h3>
           <div className="divide-y divide-gray-50 max-h-[350px] overflow-y-auto pr-2">
             {Object.entries(pnlSummary.expenses).length > 0 ? (
@@ -364,12 +378,12 @@ export default function ProfitLossView({ sales = [], purchases = [], payments = 
               ))
             ) : (
               <div className="text-center py-10 text-xs text-gray-400">
-                এই সময়ের মাঝে কোনো খরচ বা বেতন এন্ট্রি পাওয়া যায়নি।
+                এই সময়ের মাঝে কোনো খরচ বা বেতন এন্ট্রি পাওয়া যায়নি।
               </div>
             )}
           </div>
           <div className="border-t border-gray-100 pt-3 mt-4 flex justify-between font-black text-sm text-gray-900 bg-gray-50/50 p-3 rounded-2xl">
-            <span>সর্বমোট পরিচালন ব্যয়</span>
+            <span>সর্বমোট পরিচালন ব্যয়</span>
             <span className="font-mono text-red-650">{formatCurrency(pnlSummary.totalExpenses)}</span>
           </div>
         </div>
@@ -377,7 +391,7 @@ export default function ProfitLossView({ sales = [], purchases = [], payments = 
         {/* Extra Income List */}
         <div className="bg-white p-6 rounded-3xl border border-gray-150 shadow-xs">
           <h3 className="font-extrabold text-base text-gray-950 mb-4 border-b border-gray-50 pb-3 flex items-center gap-2">
-            <span className="w-1.5 h-4 bg-indigo-500 rounded-sm" />আদার্স/অন্যান্য আয়ের খাতসমূহ (Supplementary Revenues)
+            <span className="w-1.5 h-4 bg-indigo-500 rounded-sm" />আদার্স/অন্যান্য আয়ের খাতসমূহ (Supplementary Revenues)
           </h3>
           <div className="divide-y divide-gray-50 max-h-[350px] overflow-y-auto pr-2">
             {Object.entries(pnlSummary.income).length > 0 ? (
@@ -389,12 +403,12 @@ export default function ProfitLossView({ sales = [], purchases = [], payments = 
               ))
             ) : (
               <div className="text-center py-10 text-xs text-gray-400">
-                এই সময়ের মাঝে কোনো বাড়তি আয় এন্ট্রি পাওয়া যায়নি।
+                এই সময়ের মাঝে কোনো বাড়তি আয় এন্ট্রি পাওয়া যায়নি।
               </div>
             )}
           </div>
           <div className="border-t border-gray-100 pt-3 mt-4 flex justify-between font-black text-sm text-gray-900 bg-indigo-50/20 p-3 rounded-2xl">
-            <span>সর্বমোট অন্যান্য সাধারণ আয়</span>
+            <span>সর্বমোট অন্যান্য সাধারণ আয়</span>
             <span className="font-mono text-indigo-600">{formatCurrency(pnlSummary.totalOthersIncome)}</span>
           </div>
         </div>
