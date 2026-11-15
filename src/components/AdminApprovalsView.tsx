@@ -103,7 +103,7 @@ export default function AdminApprovalsView({
 
       setProcessingIds(prev => prev.filter(id => !selectedItems.includes(id)));
       setSelectedItems([]);
-      toast.success("বাল্ক অ্যাকশন সম্পন্ন হয়েছে");
+      toast.success("বাল্ক অ্যাকশন সম্পন্ন হয়েছে");
     };
 
     // For rejection, require confirmation
@@ -187,10 +187,10 @@ export default function AdminApprovalsView({
     try {
       if (onApproveSubDb) {
         await onApproveSubDb(id);
-        toast.success("সাব-ডিবি পয়েন্টটি সফলভাবে অনুমোদিত হয়েছে এবং সক্রিয় করা হয়েছে");
+        toast.success("সাব-ডিবি পয়েন্টটি সফলভাবে অনুমোদিত হয়েছে এবং সক্রিয় করা হয়েছে");
       }
     } catch (e: any) {
-      toast.error("অনুমোদন ব্যর্থ হয়েছে: " + e.message);
+      toast.error("অনুমোদন ব্যর্থ হয়েছে: " + e.message);
     } finally {
       setProcessingIds(prev => prev.filter(item => item !== id));
     }
@@ -209,10 +209,10 @@ export default function AdminApprovalsView({
         try {
           if (onRejectSubDb) {
             await onRejectSubDb(id);
-            toast.success("সাব-ডিবি পয়েন্ট রেকর্ডটি নাকচ/মুছে ফেলা হয়েছে");
+            toast.success("সাব-ডিবি পয়েন্ট রেকর্ডটি নাকচ/মুছে ফেলা হয়েছে");
           }
         } catch (e: any) {
-          toast.error("নাকচ করতে সমস্যা হয়েছে: " + e.message);
+          toast.error("নাকচ করতে সমস্যা হয়েছে: " + e.message);
           throw e;
         } finally {
           setProcessingIds(prev => prev.filter(item => item !== id));
@@ -226,9 +226,9 @@ export default function AdminApprovalsView({
     setProcessingIds(prev => [...prev, id]);
     try {
       await onApproveSale(id);
-      toast.success("সেলস এন্ট্রি সফলভাবে অনুমোদিত হয়েছে এবং স্টক আপডেট করা হয়েছে");
+      toast.success("সেলস এন্ট্রি সফলভাবে অনুমোদিত হয়েছে এবং স্টক আপডেট করা হয়েছে");
     } catch (e: any) {
-      toast.error("অনুমোদন ব্যর্থ হয়েছে: " + e.message);
+      toast.error("অনুমোদন ব্যর্থ হয়েছে: " + e.message);
     } finally {
       setProcessingIds(prev => prev.filter(item => item !== id));
     }
@@ -236,12 +236,11 @@ export default function AdminApprovalsView({
 
   const handleRejectSale = async (id: string) => {
     if (processingIds.includes(id)) return;
-    setProcessingIds(prev => [...prev, id]);
     try {
       await onRejectSale(id);
-      toast.success("সেলস এন্ট্রি বাতিল করা হয়েছে");
+      toast.success("সেলস এন্ট্রি বাতিল করা হয়েছে");
     } catch (e: any) {
-      toast.error("বাতিল করতে সমস্যা হয়েছে: " + e.message);
+      toast.error("বাতিল করতে সমস্যা হয়েছে: " + e.message);
     } finally {
       setProcessingIds(prev => prev.filter(item => item !== id));
     }
@@ -252,9 +251,9 @@ export default function AdminApprovalsView({
     setProcessingIds(prev => [...prev, id]);
     try {
       await onApproveSettlement(id);
-      toast.success("সেটেলমেন্ট সফলভাবে অনুমোদিত হয়েছে। স্টক এবং কাস্টমার বাকি আপডেট করা হয়েছে");
+      toast.success("সেটেলমেন্ট সফলভাবে অনুমোদিত হয়েছে। স্টক এবং কাস্টমার বাকি আপডেট করা হয়েছে");
     } catch (e: any) {
-      toast.error("অনুমোদন ব্যর্থ হয়েছে: " + e.message);
+      toast.error("অনুমোদন ব্যর্থ হয়েছে: " + e.message);
     } finally {
       setProcessingIds(prev => prev.filter(item => item !== id));
     }
@@ -262,12 +261,11 @@ export default function AdminApprovalsView({
 
   const handleRejectSettlement = async (id: string) => {
     if (processingIds.includes(id)) return;
-    setProcessingIds(prev => [...prev, id]);
     try {
       await onRejectSettlement(id);
-      toast.success("সেটেলমেন্ট এন্ট্রি বাতিল করা হয়েছে");
+      toast.success("সেটেলমেন্ট এন্ট্রি বাতিল করা হয়েছে");
     } catch (e: any) {
-      toast.error("বাতিল করতে সমস্যা হয়েছে: " + e.message);
+      toast.error("বাতিল করতে সমস্যা হয়েছে: " + e.message);
     } finally {
       setProcessingIds(prev => prev.filter(item => item !== id));
     }
@@ -278,9 +276,9 @@ export default function AdminApprovalsView({
     setProcessingIds(prev => [...prev, id]);
     try {
       await onApprovePayment(id);
-      toast.success("পেমেন্ট ও বিল এন্ট্রি সফলভাবে অনুমোদিত হয়েছে");
+      toast.success("পেমেন্ট ও বিল এন্ট্রি সফলভাবে অনুমোদিত হয়েছে");
     } catch (e: any) {
-      toast.error("অনুমোদন ব্যর্থ হয়েছে: " + e.message);
+      toast.error("অনুমোদন ব্যর্থ হয়েছে: " + e.message);
     } finally {
       setProcessingIds(prev => prev.filter(item => item !== id));
     }
@@ -288,12 +286,11 @@ export default function AdminApprovalsView({
 
   const handleRejectPayment = async (id: string) => {
     if (processingIds.includes(id)) return;
-    setProcessingIds(prev => [...prev, id]);
     try {
       await onRejectPayment(id);
-      toast.success("পেমেন্ট রেকর্ড বাতিল করা হয়েছে");
+      toast.success("পেমেন্ট রেকর্ড বাতিল করা হয়েছে");
     } catch (e: any) {
-      toast.error("বাতিল করতে সমস্যা হয়েছে: " + e.message);
+      toast.error("বাতিল করতে সমস্যা হয়েছে: " + e.message);
     } finally {
       setProcessingIds(prev => prev.filter(item => item !== id));
     }
@@ -310,7 +307,7 @@ export default function AdminApprovalsView({
               ম্যানেজার হিসাব অনুমোদন এবং ভেরিফিকেশন প্যানেল
             </h2>
             <p className="text-slate-400 text-xs md:text-sm max-w-2xl leading-relaxed">
-              ম্যানেজারের মাধ্যমে দিনশেষে সম্পন্ন সকল ট্রানজেকশন (হিসাব নিকাশ, নতুন বিক্রয় ও ক্যাশ ট্রান্সফার) যাচাই এবং চূড়ান্ত অনুমোদন করুন। আপনার অনুমোদনের পরেই এগুলো স্টক ও ফাইনাল লেজারে যোগ হবে।
+              ম্যানেজারের মাধ্যমে দিনশেষে সম্পন্ন সকল ট্রানজেকশন (হিসাব নিকাশ, নতুন বিক্রয় ও ক্যাশ ট্রান্সফার) যাচাই এবং চূড়ান্ত অনুমোদন করুন। আপনার অনুমোদনের পরেই এগুলো স্টক ও ফাইনাল লেজারে যোগ হবে।
             </p>
           </div>
           <div className="flex gap-2 items-center">
@@ -339,7 +336,7 @@ export default function AdminApprovalsView({
           }`}
         >
           <ShoppingBag className="w-4 h-4" />
-          বিক্রয় ও পস ({pendingSales.length})
+          বিক্রয় ও পস ({pendingSales.length})
         </button>
         <button
           onClick={() => setActiveTab("settlement")}
@@ -372,7 +369,7 @@ export default function AdminApprovalsView({
           }`}
         >
           <Award className="w-4 h-4 text-indigo-500" />
-          সাব-ডিবি পয়েন্ট ({pendingSubDbs.length})
+          সাব-ডিবি পয়েন্ট ({pendingSubDbs.length})
         </button>
       </div>
 
@@ -406,7 +403,7 @@ export default function AdminApprovalsView({
                               {new Date(sale.date).toLocaleDateString("bn-BD")}
                             </span>
                             <h4 className="font-bold text-sm text-gray-900 mt-1 flex items-center gap-1.5 flex-wrap">
-                              কাস্টমার: {cust?.name || "নগদ বিক্রয় (Cash Memo)"}
+                              কাস্টমার: {cust?.name || "নগদ বিক্রয় (Cash Memo)"}
                               {cust?.groupId && (() => {
                                 const colors = getGroupColors(cust.groupId);
                                 return (
@@ -483,6 +480,7 @@ export default function AdminApprovalsView({
                 {pendingSettlements.map(summ => {
                   const dsr = staff.find(st => st.id === summ.dsrId);
                   const rt = routes.find(r => r.id === summ.routeId);
+                  const openingAdvanceVal = Number(summ.openingAdvance || 0);
 
                   return (
                     <div key={summ.id} className={`bg-slate-50/50 rounded-2xl border p-5 md:p-6 ${selectedItems.includes(summ.id) ? 'border-indigo-500' : 'border-slate-200'} transition-all`}>
@@ -500,8 +498,16 @@ export default function AdminApprovalsView({
                           </div>
                         </div>
                         <div className="flex flex-row items-end gap-6 text-right">
+                          {openingAdvanceVal > 0 && (
+                            <div>
+                              <span className="text-[10px] text-amber-600 block font-bold">পুরনো অ্যাডভান্স</span>
+                              <span className="text-lg font-black text-amber-700">
+                                {formatCurrency(openingAdvanceVal)}
+                              </span>
+                            </div>
+                          )}
                           <div>
-                            <span className="text-[10px] text-gray-400 block font-bold">প্রদেয় (DSR Payable)</span>
+                            <span className="text-[10px] text-gray-400 block font-bold">প্রদেয় (DSR Payable)</span>
                             <span className="text-lg font-extrabold text-gray-900">{formatCurrency(summ.dsrPayable || summ.salesValue)}</span>
                           </div>
                           <div>
@@ -544,6 +550,12 @@ export default function AdminApprovalsView({
                             {(summ.payments || []).map((p: any) => `${p.method}: ${p.amount}`).join(", ") || "কোন পেমেন্ট নেই"}
                           </span>
                         </div>
+                        {openingAdvanceVal > 0 && (
+                          <div className="bg-amber-50 p-3 rounded-xl border border-amber-200 col-span-2">
+                            <span className="text-amber-700 block text-[10px] font-bold">⚠️ পুরনো অ্যাডভান্স (আগের জমা — অনুমোদনে আজকের ঘাটতি থেকে আগে কাটা হবে)</span>
+                            <span className="font-extrabold text-amber-900">{formatCurrency(openingAdvanceVal)}</span>
+                          </div>
+                        )}
                       </div>
 
                       {/* Display Return Lists */}
@@ -558,7 +570,7 @@ export default function AdminApprovalsView({
                               <div key={idx} className="flex justify-between items-center py-1.5">
                                 <span className="font-medium text-gray-700">{item.name}</span>
                                 <div className="flex gap-4 font-bold text-left">
-                                  {item.returns > 0 && <span className="text-teal-600">რიটার্ন: {item.returns}</span>}
+                                  {item.returns > 0 && <span className="text-teal-600">রিটার্ন: {item.returns}</span>}
                                   {item.damage > 0 && <span className="text-orange-600">ড্যামেজ: {item.damage}</span>}
                                 </div>
                               </div>
@@ -700,12 +712,12 @@ export default function AdminApprovalsView({
         {/* Tab 4: Sub-DB Approvals */}
         {activeTab === "subdb" && (
           <div className="space-y-4">
-            <h3 className="font-extrabold text-gray-900 mb-2">পেন্ডিং সাব-ডিবি বিতরণকারী পয়েন্ট যাচাই ও অনুমোদন</h3>
+            <h3 className="font-extrabold text-gray-900 mb-2">পেন্ডিং সাব-ডিবি বিতরণকারী পয়েন্ট যাচাই ও অনুমোদন</h3>
             {renderBulkActionBar()}
             
             {pendingSubDbs.length === 0 ? (
               <div className="text-center py-16 text-gray-400 font-semibold border-2 border-dashed rounded-2xl">
-                কোনো পেন্ডিং সাব-ডিবি পয়েন্ট অনুমোদনের জন্য অপেক্ষমান নেই
+                কোনো পেন্ডিং সাব-ডিবি পয়েন্ট অনুমোদনের জন্য অপেক্ষমান নেই
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
