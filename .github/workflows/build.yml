@@ -1,0 +1,31 @@
+name: Build & Type Check
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Type check (tsc --noEmit)
+        run: npx tsc --noEmit
+
+      - name: Production build (vite)
+        run: npx vite build
+
+      - name: Build result
+        if: success()
+        run: echo "✅ বিল্ড ও টাইপ-চেক সফল — জ্ঞাত এরর শূন্য"
