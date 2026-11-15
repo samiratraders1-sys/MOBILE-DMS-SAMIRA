@@ -58,6 +58,8 @@ import ExpenseLedgerView from "./components/ExpenseLedgerView";
 import SupplierClaimsView from "./components/SupplierClaimsView";
 import CustomerCollectionModule from "./components/CustomerCollectionModule";
 import AuditComplianceView from "./components/AuditComplianceView";
+import ClaimBillView from "./components/ClaimBillView";
+import DataAuditView from "./components/DataAuditView";
 import DocumentScannerModal from "./components/DocumentScannerModal";
 
 import { useCollection } from "./hooks/useCollection";
@@ -1803,6 +1805,28 @@ export default function App() {
             role={role}
           />
         );
+      case "claim-bill":
+        return (
+          <ClaimBillView
+            transactions={transactions.data}
+            suppliers={suppliers.data}
+            role={role}
+          />
+        );
+      case "data-audit":
+        return (
+          <DataAuditView
+            customers={customers.data}
+            suppliers={suppliers.data}
+            staff={staff.data}
+            transactions={transactions.data}
+            products={products.data}
+            updateCustomer={customers.update}
+            updateSupplier={suppliers.update}
+            updateStaff={staff.update}
+            removeTransaction={transactions.remove}
+          />
+        );
       case "supplier-claims":
         return (
           <SupplierClaimsView
@@ -2612,5 +2636,6 @@ function Placeholder({ title, icon }: { title: string, icon: string }) {
     </div>
   );
 }
+
 
 

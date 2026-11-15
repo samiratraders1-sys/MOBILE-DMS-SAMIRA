@@ -1,4 +1,4 @@
-import { Users, Database, ShoppingCart, Package, TrendingUp, RefreshCw, FileText, Truck, Wallet, DollarSign, BookOpen, BarChart } from "lucide-react";
+import { Users, Database, ShoppingCart, Package, TrendingUp, RefreshCw, FileText, Truck, Wallet, DollarSign, BookOpen, BarChart, ShieldCheck } from "lucide-react";
 import { motion } from "motion/react";
 
 const menuItems = [
@@ -15,6 +15,7 @@ const menuItems = [
   { name: "SR/DSR/DM Management", label: "SR/DSR/DM ম্যানেজমেন্ট", icon: BookOpen, view: "dsr-portal" },
   { name: "Reports Management", label: "রিপোর্টস ম্যানেজমেন্ট", icon: BarChart, view: "reports" },
   { name: "Supplier Claim Bill", label: "সাপ্লায়ার ক্লেইম বিল", icon: FileText, view: "claim-bill" },
+  { name: "Data Audit & Cleanup", label: "ডাটা অডিট ও পরিষ্কার", icon: ShieldCheck, view: "data-audit" },
 ];
 
 export default function MainMenuView({ setActiveView }: { setActiveView: (view: string) => void }) {
@@ -38,4 +39,3 @@ export default function MainMenuView({ setActiveView }: { setActiveView: (view: 
     </div>
   );
 }
-
