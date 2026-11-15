@@ -11,16 +11,33 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Check secrets are configured
+        id: check
+        env:
+          HAS_SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT != '' }}
+          HAS_PROJECT: ${{ secrets.GCLOUD_PROJECT != '' }}
+        run: |
+          if [ "$HAS_SA" != "true" ] || [ "$HAS_PROJECT" != "true" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::সিক্রেট সেট করা নেই — ডিপ্লয় স্কিপ করা হলো। Settings → Secrets → Actions-এ FIREBASE_SERVICE_ACCOUNT ও GCLOUD_PROJECT দিলে পরের রানে ডিপ্লয় হবে।"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/setup-node@v4
+        if: steps.check.outputs.configured == 'true'
         with:
           node-version: '20'
+
       - run: npm install -g firebase-tools
+        if: steps.check.outputs.configured == 'true'
+
       - name: Deploy Firestore rules
+        if: steps.check.outputs.configured == 'true'
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          GCLOUD_PROJECT: ${{ secrets.GCLOUD_PROJECT }}
         run: |
           echo "$FIREBASE_SERVICE_ACCOUNT" > /tmp/sa.json
-          firebase deploy --only firestore:rules --project "$GCLOUD_PROJECT" --service-account /tmp/sa.json --non-interactive || \
-          firebase deploy --only firestore:rules --project "$GCLOUD_PROJECT" --non-interactive
-        # নোট: রিপো সিক্রেটে FIREBASE_SERVICE_ACCOUNT (সার্ভিস অ্যাকাউন্ট JSON-এর পুরো কনটেন্ট)
-        # এবং GCLOUD_PROJECT (ফায়ারবেস প্রজেক্ট আইডি) সেট করতে হবে।
+          firebase deploy --only firestore:rules --project "$GCLOUD_PROJECT" --service-account /tmp/sa.json --non-interactive
