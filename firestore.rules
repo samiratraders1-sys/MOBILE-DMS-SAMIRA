@@ -1,9 +1,17 @@
 rules_version = '2';
+
+// SAMIRA DMS — Firestore Security Rules (Phase 5 hardening)
+// নীতি: Firebase Auth-এ লগইন না করা কেউ কিছুই পড়তে/লিখতে পারবে না।
+// ডেমো/অফলাইন সেশন localStorage ব্যবহার করে — Firestore ছোঁয় না, তাই এতে সমস্যা নেই।
+// নোট: রোল-ভিত্তিক (admin/manager/dsr) ফাইন-গ্রেইন রুলের জন্য users কালেকশন
+// uid-কী-ডকুমেন্টে মাইগ্রেট করতে হবে (পরের ধাপে করা হবে)।
+
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // সব ডকুমেন্ট: শুধু লগইনকৃত (Firebase Auth) ইউজার পড়তে ও লিখতে পারবে
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if request.auth != null;
     }
   }
 }
-
