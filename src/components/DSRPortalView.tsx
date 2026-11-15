@@ -196,7 +196,7 @@ export default function DSRPortalView({
 
     const totalFreeValue = freeItems.reduce((acc, f) => {
       const prodObj = products.find(p => p.id === f.productId);
-      return acc + (f.quantity * (prodObj?.price || 0));
+      return acc + (Number(f.quantity) * Number(f.unitPrice ?? prodObj?.price ?? 0));
     }, 0);
 
     const totalDiscountValue = discountItems.reduce((acc, d) => acc + d.amount, 0);
@@ -247,7 +247,7 @@ export default function DSRPortalView({
       updated[existingIdx].quantity += Number(freeQty);
       setFreeItems(updated);
     } else {
-      setFreeItems([...freeItems, { productId: selectedProductIdFree, quantity: Number(freeQty) }]);
+      setFreeItems([...freeItems, { productId: selectedProductIdFree, quantity: Number(freeQty), unitPrice: Number(products.find(p => p.id === selectedProductIdFree)?.price || 0) }]);
     }
     setSelectedProductIdFree("");
     setFreeQty("");
@@ -1135,3 +1135,4 @@ export default function DSRPortalView({
     </div>
   );
 }
+
