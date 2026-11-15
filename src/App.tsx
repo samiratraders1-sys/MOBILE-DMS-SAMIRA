@@ -56,7 +56,6 @@ import OrderManagementPage from "./pages/OrderManagement";
 import { handleCompleteSale } from "./services/salesService";
 import ExpenseLedgerView from "./components/ExpenseLedgerView";
 import SupplierClaimsView from "./components/SupplierClaimsView";
-import ClaimBillView from "./components/ClaimBillView";
 import CustomerCollectionModule from "./components/CustomerCollectionModule";
 import AuditComplianceView from "./components/AuditComplianceView";
 import DocumentScannerModal from "./components/DocumentScannerModal";
@@ -1003,10 +1002,49 @@ export default function App() {
       }
     }
 
-    // 9. Discrepancy (Short) handling
+    // 9. Discrepancy (Short) handling — FIX §11: পুরনো অ্যাডভান্স আগে খরচ হয়
     const shortVal = Number(summ.dsrBalance !== undefined ? summ.dsrBalance : 0);
-    if (shortVal < 0) {
-      const shortAmount = Math.abs(shortVal);
+    const openingAdvanceVal = Number(summ.openingAdvance || 0);
+    const effectiveShortVal = shortVal + openingAdvanceVal;
+    // পুরনো অ্যাডভান্সের যতটা এবারের ঘাটতি মেটালো → লেজারে ADVANCE_USED
+    const advanceUsedVal = openingAdvanceVal > 0 ? Math.min(openingAdvanceVal, Math.max(0, -shortVal)) : 0;
+    if (advanceUsedVal > 0) {
+      const hasAdvUsed = (transactions.data || []).some((t: any) => t.refId === summaryId && t.type === "ADVANCE_USED");
+      if (!hasAdvUsed) {
+        await transactions.add({
+          ref: summaryId,
+          refId: summaryId,
+          partyId: summ.dsrId,
+          partyType: "STAFF",
+          type: "ADVANCE_USED",
+          amount: advanceUsedVal,
+          date: settlementDate,
+          description: `পুরনো অ্যাডভান্স খরচ — ৳${advanceUsedVal} অ্যাডভান্স থেকে কাটা হলো (রুট বিল #${summaryId.slice(-4).toUpperCase()})`,
+          createdBy: "System",
+          createdAt: new Date().toISOString()
+        });
+      }
+    }
+    // ঘাটতি নেই কিন্তু প্রদেয়ের চেয়ে বেশি জমা → অবশিষ্টটা DSR অ্যাডভান্স (কোম্পানি DSR-কে দেবে)
+    if (effectiveShortVal > 0 && shortVal >= 0) {
+      const hasSurplusAdv = (transactions.data || []).some((t: any) => t.refId === summaryId && t.type === "ADVANCE");
+      if (!hasSurplusAdv) {
+        await transactions.add({
+          ref: summaryId,
+          refId: summaryId,
+          partyId: summ.dsrId,
+          partyType: "STAFF",
+          type: "ADVANCE",
+          amount: effectiveShortVal,
+          date: settlementDate,
+          description: `DSR অ্যাডভান্স — প্রদেয়ের চেয়ে ৳${effectiveShortVal} বেশি জমা (রুট বিল #${summaryId.slice(-4).toUpperCase()})`,
+          createdBy: "System",
+          createdAt: new Date().toISOString()
+        });
+      }
+    }
+    if (effectiveShortVal < 0) {
+      const shortAmount = Math.abs(effectiveShortVal);
       if (dsrObj) {
         const hasShortPay = (payments.data || []).some((p: any) => p.refId === summaryId && (p.category === "Manager Salary Advance" || p.category === "Recoverable Debt"));
         if (!hasShortPay) {
@@ -1777,14 +1815,6 @@ export default function App() {
             addTransaction={async (tx) => { await transactions.add(tx); }}
             role={role}
             userEmail={user?.email || ""}
-          />
-        );
-      case "claim-bill":
-        return (
-          <ClaimBillView
-            transactions={transactions.data}
-            suppliers={suppliers.data}
-            role={role}
           />
         );
       case "payment-history":

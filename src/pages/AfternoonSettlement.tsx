@@ -86,6 +86,9 @@ export default function AfternoonSettlementPage({
   const [credits, setCredits] = useState<{ customerId: string; customerName?: string; supplierId: string; supplierName?: string; amount: number; note?: string }[]>([]);
   const [payments, setPayments] = useState<{ method: string; amount: number; ref?: string }[]>([]);
 
+  // পুরনো DSR অ্যাডভান্স (রিকোয়ারমেন্ট §11) — আগের সেটেলমেন্টে DSR বেশি জমা দিয়ে থাকলে সেই টাকা
+  const [openingAdvance, setOpeningAdvance] = useState<string>("");
+
   // Search/Helpers for Free items
   const [freeSearchQuery, setFreeSearchQuery] = useState("");
   const [selectedFreeProduct, setSelectedFreeProduct] = useState<any | null>(null);
@@ -213,7 +216,9 @@ export default function AfternoonSettlementPage({
     // Traditional Accounting Formula for DSR Route Settlement:
     // DSR Payable = Gross Sales - Damage - Free - Discount - Expenses - Customer Credits
     const dsrPayable = totalSalesValue - totalDamageValue - totalFreeValue - totalDiscountValue - totalExpensesValue - totalCreditsValue;
-    const balance = totalPaymentsValue - dsrPayable;
+    // FIX §11: পুরনো অ্যাডভান্স আগে খরচ হবে — ব্যালেন্স = জমা + পুরনো অ্যাডভান্স − প্রদেয়
+    const openingAdvanceVal = Number(openingAdvance) || 0;
+    const balance = totalPaymentsValue + openingAdvanceVal - dsrPayable;
 
     return {
       items,
@@ -229,10 +234,21 @@ export default function AfternoonSettlementPage({
       totalExpensesValue,
       totalCreditsValue,
       totalPaymentsValue,
+      openingAdvanceVal,
       dsrPayable,
       balance
     };
-  }, [currentSummary, returnQtys, damageItems, freeItems, discountItems, expenses, credits, payments, products]);
+  }, [currentSummary, returnQtys, damageItems, freeItems, discountItems, expenses, credits, payments, products, openingAdvance]);
+
+  // পুরনো অ্যাডভান্স প্রিফিল: সামারিতে আগের মান থাকলে সেটাই বসবে
+  useEffect(() => {
+    setOpeningAdvance(
+      currentSummary?.openingAdvance !== undefined && currentSummary?.openingAdvance !== null
+        ? String(currentSummary.openingAdvance)
+        : ""
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentSummary?.id]);
 
   // Quick fill return helper: All Sold (returns = 0)
   const handleMarkAllSold = () => {
@@ -276,6 +292,7 @@ export default function AfternoonSettlementPage({
         totalPayments: calculations?.totalPaymentsValue || 0,
         dsrPayable: calculations?.dsrPayable || 0,
         dsrBalance: calculations?.balance || 0,
+        openingAdvance: calculations?.openingAdvanceVal || 0,
         paidAmount: calculations?.totalPaymentsValue || 0,
         dueAmount: calculations?.dsrPayable || 0,
         shortBalance: calculations?.balance && calculations.balance < 0 ? Math.abs(calculations.balance) : 0,
@@ -1177,6 +1194,24 @@ export default function AfternoonSettlementPage({
                   </div>
                 </div>
 
+                {/* পুরনো অ্যাডভান্স ইনপুট (§11) */}
+                <div className="space-y-2 bg-amber-50/60 p-5 rounded-2xl border border-amber-200/80">
+                  <h4 className="text-xs font-black uppercase tracking-wider text-amber-800">
+                    পুরনো ডিএসআর অ্যাডভান্স (আগের জমা থেকে কাটা হবে)
+                  </h4>
+                  <input
+                    type="number"
+                    min="0"
+                    placeholder="পুরনো অ্যাডভান্স (৳)"
+                    value={openingAdvance}
+                    onChange={(e) => setOpeningAdvance(e.target.value)}
+                    className="w-full px-3 py-2.5 bg-white border border-amber-300 rounded-xl text-xs font-bold text-center"
+                  />
+                  <p className="text-[10px] text-amber-700 font-bold">
+                    এই টাকা আগেই DSR বেশি জমা দিয়েছিল — আজকের ঘাটতি থেকে আগে এটা কাটা হবে।
+                  </p>
+                </div>
+
                 {/* Right: Traditional Accounting Formula Breakdown */}
                 <div className="bg-indigo-950 text-white p-6 rounded-2xl shadow-lg space-y-3 text-xs">
                   <div className="flex justify-between py-1.5 border-b border-indigo-900 font-medium">
@@ -1222,6 +1257,11 @@ export default function AfternoonSettlementPage({
                   <div className="flex justify-between py-1.5 font-bold text-emerald-300">
                     <span>আদায়কৃত নগদ ও ডিজিটাল ক্যাশ (+):</span>
                     <span>৳{calculations?.totalPaymentsValue.toLocaleString()}</span>
+                  </div>
+
+                  <div className="flex justify-between py-1.5 font-bold text-amber-600">
+                    <span>পুরনো অ্যাডভান্স থেকে কাটা (+):</span>
+                    <span>৳{(calculations?.openingAdvanceVal || 0).toLocaleString()}</span>
                   </div>
 
                   {/* Grand Net Balance */}
@@ -1359,3 +1399,4 @@ export default function AfternoonSettlementPage({
     </div>
   );
 }
+

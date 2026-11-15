@@ -102,6 +102,9 @@ export default function DSRPortalView({
   const [credits, setCredits] = useState<{ customerId: string; amount: number }[]>([]);
   const [payments, setPayments] = useState<{ method: string; amount: number }[]>([]);
 
+  // পুরনো DSR অ্যাডভান্স (রিকোয়ারমেন্ট §11) — আগের সেটেলমেন্টে DSR বেশি জমা দিয়ে থাকলে সেই টাকা
+  const [openingAdvance, setOpeningAdvance] = useState<string>("");
+
   // Search/selection helpers for forms
   const [selectedProductIdFree, setSelectedProductIdFree] = useState("");
   const [freeQty, setFreeQty] = useState("");
@@ -158,6 +161,17 @@ export default function DSRPortalView({
     }
   }, [activeSummary]);
 
+  // পুরনো অ্যাডভান্স অটো-পূরণ: সামারিতে থাকলে সেটাই, না থাকলে লেজারের নেগেটিভ ব্যালেন্স (কোম্পানির কাছে DSR-এর জমা)
+  useEffect(() => {
+    if (activeSummary?.openingAdvance !== undefined && activeSummary?.openingAdvance !== null) {
+      setOpeningAdvance(String(activeSummary.openingAdvance));
+    } else {
+      const adv = Math.max(0, -(systemLedgerBalance || 0));
+      setOpeningAdvance(adv > 0 ? String(Math.round(adv * 100) / 100) : "");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSummary?.id, selectedDSRId]);
+
   // Form calculation results
   const calculations = useMemo(() => {
     if (!activeSummary) return null;
@@ -192,7 +206,9 @@ export default function DSRPortalView({
 
     // DSR Payable = (Total Sales) - (Damage Value) - (Free Value) - (Discounts) - (Expenses) - (Credits/Baki)
     const dsrPayable = totalSalesValue - totalDamageValue - totalFreeValue - totalDiscountValue - totalExpensesValue - totalCreditsValue;
-    const balance = totalPaymentsValue - dsrPayable;
+    // FIX §11: পুরনো অ্যাডভান্স আগে খরচ হবে — ব্যালেন্স = জমা + পুরনো অ্যাডভান্স − প্রদেয়
+    const openingAdvanceVal = Number(openingAdvance) || 0;
+    const balance = totalPaymentsValue + openingAdvanceVal - dsrPayable;
 
     return {
       items,
@@ -203,10 +219,11 @@ export default function DSRPortalView({
       totalExpensesValue,
       totalCreditsValue,
       totalPaymentsValue,
+      openingAdvanceVal,
       dsrPayable,
       balance
     };
-  }, [activeSummary, returnQtys, damageItems, freeItems, discountItems, expenses, credits, payments, products]);
+  }, [activeSummary, returnQtys, damageItems, freeItems, discountItems, expenses, credits, payments, products, openingAdvance]);
 
   const handleReturnChange = (productId: string, val: number) => {
     setReturnQtys(prev => ({
@@ -234,7 +251,7 @@ export default function DSRPortalView({
     }
     setSelectedProductIdFree("");
     setFreeQty("");
-    toast.success("ফ্রি প্রোডাক্ট এন্ট্রি যোগ হয়েছে");
+    toast.success("ফ্রি প্রোডাক্ট এন্ট্রি যোগ হয়েছে");
   };
 
   const handleAddDiscount = () => {
@@ -249,7 +266,7 @@ export default function DSRPortalView({
     }
     setSelectedProductIdDiscount("");
     setDiscountAmt("");
-    toast.success("ডিসকাউন্ট এন্ট্রি যোগ হয়েছে");
+    toast.success("ডিসকাউন্ট এন্ট্রি যোগ হয়েছে");
   };
 
   const handleAddExpense = () => {
@@ -261,7 +278,7 @@ export default function DSRPortalView({
     }]);
     setExpenseAmt("");
     setExpenseDesc("");
-    toast.success("খরচ এন্ট্রি যোগ হয়েছে");
+    toast.success("খরচ এন্ট্রি যোগ হয়েছে");
   };
 
   const handleAddCredit = () => {
@@ -276,14 +293,14 @@ export default function DSRPortalView({
     }
     setSelectedCustomerId("");
     setDueAmt("");
-    toast.success("কাস্টমার বাকি এন্ট্রি যোগ হয়েছে");
+    toast.success("কাস্টমার বাকি এন্ট্রি যোগ হয়েছে");
   };
 
   const handleAddPayment = () => {
     if (!payMethod || !payAmt) return;
     setPayments([...payments, { method: payMethod, amount: Number(payAmt) }]);
     setPayAmt("");
-    toast.success("ক্যাশ আদায় এন্ট্রি যোগ হয়েছে");
+    toast.success("ক্যাশ আদায় এন্ট্রি যোগ হয়েছে");
   };
 
   const getCurrentLocation = (): Promise<{ lat: number; lng: number }> => {
@@ -368,13 +385,14 @@ export default function DSRPortalView({
         totalCredits: calculations.totalCreditsValue,
         totalPayments: calculations.totalPaymentsValue,
         dsrPayable: calculations.dsrPayable,
-        dsrBalance: calculations.balance
+        dsrBalance: calculations.balance,
+        openingAdvance: Number(openingAdvance) || 0
       };
 
       await updateSummary(activeSummary.id, payload);
-      toast.success("সাফল্য! আজকের হিসাব সফলভাবে এডমিনের প্যানেলে অনুমোদনের জন্য পাঠানো হয়েছে।");
+      toast.success("সাফল্য! আজকের হিসাব সফলভাবে এডমিনের প্যানেলে অনুমোদনের জন্য পাঠানো হয়েছে।");
     } catch (e: any) {
-      toast.error("হিসাব সাবমিট করতে সমস্যা হয়েছে: " + e.message);
+      toast.error("হিসাব সাবমিট করতে সমস্যা হয়েছে: " + e.message);
     }
   };
 
@@ -468,7 +486,7 @@ export default function DSRPortalView({
         <div className="bg-amber-50 border border-amber-200 text-amber-900 p-4 rounded-2xl flex items-center gap-3 shadow-sm mt-6">
           <AlertTriangle className="w-5 h-5 text-amber-600" />
           <p className="text-sm font-bold">
-            আপনার {pendingSyncCount}টি অর্ডার অফলাইনে আছে যা সিঙ্ক করার অপেক্ষায় আছে।
+            আপনার {pendingSyncCount}টি অর্ডার অফলাইনে আছে যা সিঙ্ক করার অপেক্ষায় আছে।
           </p>
         </div>
       )}
@@ -479,7 +497,7 @@ export default function DSRPortalView({
       {activeSummary && (
         <div className="bg-white p-6 rounded-3xl border shadow-sm mb-6">
           <div className="flex justify-between items-center mb-2">
-            <h3 className="text-sm font-black text-gray-900">আজকের বিক্রয় লক্ষ্যমাত্রা</h3>
+            <h3 className="text-sm font-black text-gray-900">আজকের বিক্রয় লক্ষ্যমাত্রা</h3>
             <span className="text-xs font-bold text-gray-500">
               {formatCurrency(calculations?.totalSalesValue || 0)} / {formatCurrency(staff.find(s => s.id === selectedDSRId)?.dailySalesTarget || 10000)}
             </span>
@@ -500,9 +518,9 @@ export default function DSRPortalView({
             <AlertTriangle className="w-10 h-10 animate-bounce" />
           </div>
           <div>
-            <h4 className="text-lg font-black text-gray-900">আজকের কোনো লোডশীট পাওয়া যায়নি</h4>
+            <h4 className="text-lg font-black text-gray-900">আজকের কোনো লোডশীট পাওয়া যায়নি</h4>
             <p className="text-xs text-gray-500 mt-1 max-w-sm mx-auto leading-relaxed">
-              প্রিয় <span className="font-bold text-teal-700">{currentDSRName}</span>, আপনার রোড বা নামে ম্যানেজারের পক্ষ থেকে এখনও সকালের লোডশীট জেনারেট করা হয়নি। লোডশিট জেনারেট হলে এখানে পণ্যসমূহ চলে আসবে।
+              প্রিয় <span className="font-bold text-teal-700">{currentDSRName}</span>, আপনার রোড বা নামে ম্যানেজারের পক্ষ থেকে এখনও সকালের লোডশীট জেনারেট করা হয়নি। লোডশিট জেনারেট হলে এখানে পণ্যসমূহ চলে আসবে।
             </p>
           </div>
         </div>
@@ -531,7 +549,7 @@ export default function DSRPortalView({
                       <th className="p-3">পণ্যের বিবরণ</th>
                       <th className="p-3 text-center">লোডেড পিস (Loaded)</th>
                       <th className="p-3 text-center w-36">ভালো ফেরত (Fresh Return)</th>
-                      <th className="p-3 text-right">প্রকৃত বিক্রয় (Sold)</th>
+                      <th className="p-3 text-right">প্রকৃত বিক্রয় (Sold)</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
@@ -693,7 +711,7 @@ export default function DSRPortalView({
               <div className="bg-white rounded-3xl border shadow-xs overflow-hidden flex flex-col">
                 <div className="bg-amber-50 p-4 border-b border-amber-100 flex items-center gap-2">
                   <TrendingDown className="w-5 h-5 text-amber-600" />
-                  <h3 className="font-extrabold text-amber-950 text-sm">৩. রাস্তায় খরচ বা বিলসমূহ</h3>
+                  <h3 className="font-extrabold text-amber-950 text-sm">৩. রাস্তায় খরচ বা বিলসমূহ</h3>
                 </div>
                 <div className="p-5 flex-1 space-y-4">
                   <div className="bg-amber-50/20 p-4 border border-amber-100 rounded-2xl space-y-3">
@@ -724,7 +742,7 @@ export default function DSRPortalView({
                           type="text" 
                           value={expenseDesc} 
                           onChange={e => setExpenseDesc(e.target.value)}
-                          placeholder="উদা: গাড়ির টোল বা রিক্সা" 
+                          placeholder="উদা: গাড়ির টোল বা রিক্সা" 
                           className="w-full p-2 border rounded-xl text-xs bg-white" 
                         />
                       </div>
@@ -761,7 +779,7 @@ export default function DSRPortalView({
 
             </div>
 
-            {/* 4. Customer Credits & Cash আদায় */}
+            {/* 4. Customer Credits & Cash আদায় */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               
               {/* Customer due (বাকি) */}
@@ -840,11 +858,11 @@ export default function DSRPortalView({
                 </div>
               </div>
 
-              {/* DSR ক্যাশ আদায় (Payments Collection) */}
+              {/* DSR ক্যাশ আদায় (Payments Collection) */}
               <div className="bg-white rounded-3xl border shadow-xs overflow-hidden flex flex-col">
                 <div className="bg-indigo-50 p-4 border-b border-indigo-100 flex items-center gap-2">
                   <Wallet className="w-5 h-5 text-indigo-600" />
-                  <h3 className="font-extrabold text-indigo-950 text-sm">৫. আদায়কৃত ক্যাশ টাকা (Collection)</h3>
+                  <h3 className="font-extrabold text-indigo-950 text-sm">৫. আদায়কৃত ক্যাশ টাকা (Collection)</h3>
                 </div>
                 <div className="p-5 flex-1 space-y-4">
                   <div className="bg-indigo-50/20 p-4 rounded-2xl border border-indigo-100 space-y-3">
@@ -908,17 +926,17 @@ export default function DSRPortalView({
           <div className="space-y-6">
             <div className="bg-white p-6 rounded-3xl border shadow-lg sticky top-8 space-y-6">
               <h3 className="text-lg font-black text-gray-900 border-b pb-2 flex items-center justify-between">
-                <span>আজকের ডিএসআর খতিয়ান</span>
+                <span>আজকের ডিএসআর খতিয়ান</span>
                 <span className="text-[10px] text-gray-400 uppercase font-mono bg-gray-50 border px-2 py-0.5 rounded">Calculations</span>
               </h3>
 
               <div className="space-y-3.5 text-xs">
                 <div className="flex justify-between">
-                  <span className="text-gray-500">মোট বিক্রয়মূল্য (+):</span>
+                  <span className="text-gray-500">মোট বিক্রয়মূল্য (+):</span>
                   <span className="font-extrabold text-gray-900">{formatCurrency(calculations?.totalSalesValue)}</span>
                 </div>
                 <div className="flex justify-between text-red-600">
-                  <span className="text-gray-500">ড্যামেজ পণ্য সমন্বয় (-):</span>
+                  <span className="text-gray-500">ড্যামেজ পণ্য সমন্বয় (-):</span>
                   <span className="font-extrabold">{formatCurrency(calculations?.totalDamageValue)}</span>
                 </div>
                 <div className="flex justify-between text-purple-600">
@@ -938,12 +956,29 @@ export default function DSRPortalView({
                   <span className="font-extrabold">{formatCurrency(calculations?.totalCreditsValue)}</span>
                 </div>
                 <div className="border-t pt-3 flex justify-between text-base font-black text-emerald-700 bg-emerald-50/40 p-2.5 rounded-2xl border border-emerald-100">
-                  <span>নিট প্রদেয় ক্যাশ:</span>
+                  <span>নিট প্রদেয় ক্যাশ:</span>
                   <span>{formatCurrency(calculations?.dsrPayable)}</span>
                 </div>
                 <div className="flex justify-between text-indigo-700">
                   <span className="text-gray-500">আপনার সংগৃহীত ক্যাশ (+):</span>
                   <span className="font-extrabold">{formatCurrency(calculations?.totalPaymentsValue)}</span>
+                </div>
+              </div>
+
+              {/* পুরনো অ্যাডভান্স ইনপুট (§11) */}
+              <div className="bg-amber-50 border border-amber-200 p-4 rounded-2xl space-y-2">
+                <p className="text-[10px] font-black text-amber-800 uppercase tracking-wider">পুরনো অ্যাডভান্স (আগের জমা থেকে কাটা হবে)</p>
+                <input
+                  type="number"
+                  min="0"
+                  placeholder="পুরনো অ্যাডভান্স (৳)"
+                  value={openingAdvance}
+                  onChange={e => setOpeningAdvance(e.target.value)}
+                  className="w-full p-2 border border-amber-300 rounded-xl text-xs font-bold bg-white text-center"
+                />
+                <div className="flex justify-between text-[11px] font-bold text-amber-900">
+                  <span>অ্যাডভান্স থেকে কাটা (+):</span>
+                  <span>{formatCurrency(calculations?.openingAdvanceVal || 0)}</span>
                 </div>
               </div>
 
@@ -954,7 +989,7 @@ export default function DSRPortalView({
                   {formatCurrency(calculations?.balance)}
                 </p>
                 <p className="text-[9px] text-gray-400 font-medium">
-                  ব্যালেন্স শূন্য বা পজিটিভ হওয়া বাঞ্ছনীয়।
+                  ব্যালেন্স শূন্য বা পজিটিভ হওয়া বাঞ্ছনীয়।
                 </p>
 
                 {calculations && calculations.balance < 0 && (() => {
@@ -982,12 +1017,12 @@ export default function DSRPortalView({
                   className="w-full py-4 bg-teal-600 hover:bg-teal-700 text-white font-black text-base rounded-2xl shadow-md transition-all active:scale-95 cursor-pointer flex items-center justify-center gap-2"
                 >
                   <Save className="w-5 h-5" />
-                  হিসাব চূড়ান্ত করে এডমিনের নিকট পাঠান
+                  হিসাব চূড়ান্ত করে এডমিনের নিকট পাঠান
                 </button>
                 <div className="p-3 bg-teal-50 border border-teal-150 rounded-xl flex gap-2">
                   <Info className="w-4 h-4 text-teal-600 shrink-0 mt-0.5" />
                   <p className="text-[10px] text-teal-800 leading-normal">
-                    এটি সাবমিট করলে আপনার সমস্ত হিসাব নিকাশ চূড়ান্ত অনুমোদনের জন্য এডমিনের কাছে চলে যাবে। এডমিন হিসাবসমূহ দেখে এপ্রুভ দিলে সব ব্যালেন্স ও স্টক আপডেট হয়ে যাবে।
+                    এটি সাবমিট করলে আপনার সমস্ত হিসাব নিকাশ চূড়ান্ত অনুমোদনের জন্য এডমিনের কাছে চলে যাবে। এডমিন হিসাবসমূহ দেখে এপ্রুভ দিলে সব ব্যালেন্স ও স্টক আপডেট হয়ে যাবে।
                   </p>
                 </div>
               </div>
@@ -1029,12 +1064,12 @@ export default function DSRPortalView({
                 <div className="bg-white dark:bg-slate-950 border border-gray-200 dark:border-slate-800 p-4 rounded-2xl shadow-xs">
                   <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider flex items-center gap-1">
                     <FileText className="w-3 h-3 text-sky-500" />
-                    ম্যানুয়াল সামারি ব্যালেন্স
+                    ম্যানুয়াল সামারি ব্যালেন্স
                   </p>
                   <p className="text-lg font-black text-gray-950 dark:text-white mt-1.5 font-mono">
                     {formatCurrency(calculations?.balance || 0)}
                   </p>
-                  <p className="text-[9px] text-gray-400 mt-1">আজকের এন্ট্রিকৃত খসড়া বা অনুমোদনের হিসাব</p>
+                  <p className="text-[9px] text-gray-400 mt-1">আজকের এন্ট্রিকৃত খসড়া বা অনুমোদনের হিসাব</p>
                 </div>
 
                 {/* System Calculated Ledger */}
@@ -1046,7 +1081,7 @@ export default function DSRPortalView({
                   <p className="text-lg font-black text-gray-950 dark:text-white mt-1.5 font-mono">
                     {formatCurrency(systemLedgerBalance)}
                   </p>
-                  <p className="text-[9px] text-gray-400 mt-1">স্বয়ংক্রিয় খতিয়ান হতে প্রাপ্ত নিখুঁত ব্যালেন্স</p>
+                  <p className="text-[9px] text-gray-400 mt-1">স্বয়ংক্রিয় খতিয়ান হতে প্রাপ্ত নিখুঁত ব্যালেন্স</p>
                 </div>
               </div>
 
@@ -1067,12 +1102,12 @@ export default function DSRPortalView({
                     )}
                     <div className="space-y-1">
                       <p className="font-extrabold text-sm">
-                        {isPerfect ? "১০০% নিখুঁত সামঞ্জস্য!" : "ব্যালেন্স অমিল (Drift) পাওয়া গেছে!"}
+                        {isPerfect ? "১০০% নিখুঁত সামঞ্জস্য!" : "ব্যালেন্স অমিল (Drift) পাওয়া গেছে!"}
                       </p>
                       <p className="text-xs leading-normal font-medium">
                         {isPerfect 
-                          ? "ম্যানুয়াল হিসাব সামারি ও সিস্টেম অটোমেটেড লেজার সম্পূর্ণরূপে মিলে গিয়েছে। কোনো অমিল বা ডাটা গ্যাপ নেই।" 
-                          : `ম্যানুয়াল এন্ট্রি ব্যালেন্স এবং লেজার স্টেটমেন্ট ব্যালেন্সের মধ্যে ${formatCurrency(Math.abs(diff))} এর পার্থক্য পাওয়া গেছে।`}
+                          ? "ম্যানুয়াল হিসাব সামারি ও সিস্টেম অটোমেটেড লেজার সম্পূর্ণরূপে মিলে গিয়েছে। কোনো অমিল বা ডাটা গ্যাপ নেই।" 
+                          : `ম্যানুয়াল এন্ট্রি ব্যালেন্স এবং লেজার স্টেটমেন্ট ব্যালেন্সের মধ্যে ${formatCurrency(Math.abs(diff))} এর পার্থক্য পাওয়া গেছে।`}
                       </p>
                       {!isPerfect && (
                         <div className="mt-2 text-xs font-bold text-rose-850 bg-rose-100/50 px-2.5 py-1 rounded-lg w-fit">
