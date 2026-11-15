@@ -16,11 +16,10 @@ jobs:
         id: check
         env:
           HAS_SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT != '' }}
-          HAS_PROJECT: ${{ secrets.GCLOUD_PROJECT != '' }}
         run: |
-          if [ "$HAS_SA" != "true" ] || [ "$HAS_PROJECT" != "true" ]; then
+          if [ "$HAS_SA" != "true" ]; then
             echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::সিক্রেট সেট করা নেই — ডিপ্লয় স্কিপ করা হলো। Settings → Secrets → Actions-এ FIREBASE_SERVICE_ACCOUNT ও GCLOUD_PROJECT দিলে পরের রানে ডিপ্লয় হবে।"
+            echo "::notice::সিক্রেট সেট করা নেই — ডিপ্লয় স্কিপ করা হলো। Settings → Secrets → Actions-এ FIREBASE_SERVICE_ACCOUNT দিলে পরের রানে ডিপ্লয় হবে।"
           else
             echo "configured=true" >> "$GITHUB_OUTPUT"
           fi
@@ -35,6 +34,7 @@ jobs:
 
       - name: Validate service account JSON
         if: steps.check.outputs.configured == 'true'
+        id: sa
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: |
@@ -43,12 +43,16 @@ jobs:
             echo "::error::FIREBASE_SERVICE_ACCOUNT সিক্রেটটা বৈধ JSON নয় — পুরো service account ফাইলের ভেতরের লেখা { থেকে } পর্যন্ত হুবহু পেস্ট করতে হবে"
             exit 1
           fi
-          node -e "const j=require('/tmp/sa.json'); console.log('service account OK, project_id =', j.project_id)"
+          PID=$(node -e "process.stdout.write(require('/tmp/sa.json').project_id || '')")
+          if [ -z "$PID" ]; then
+            echo "::error::JSON-এ project_id পাওয়া যায়নি — এটা কি সত্যিই Firebase service account ফাইল?"
+            exit 1
+          fi
+          echo "project_id=$PID" >> "$GITHUB_OUTPUT"
+          echo "service account OK, project_id = $PID"
 
       - name: Deploy Firestore rules
         if: steps.check.outputs.configured == 'true'
-        env:
-          GCLOUD_PROJECT: ${{ secrets.GCLOUD_PROJECT }}
         run: |
           export GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa.json
-          firebase deploy --only firestore:rules --project "$GCLOUD_PROJECT" --non-interactive
+          firebase deploy --only firestore:rules --project "${{ steps.sa.outputs.project_id }}" --non-interactive
