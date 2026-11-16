@@ -171,10 +171,10 @@ export default function AuditComplianceView({
           log.details.includes(String(drift.drift))
         );
         if (!alreadyAlerted) {
-          await logAdminActivity(
+          logAdminActivity(
             "drift_alert",
             `AUTOMATED ALERT: Transaction balance drift detected for ${drift.type} (${drift.name}, ID: ${drift.id}). Calculated Ledger: ${drift.calculatedBalance} ৳, Stored Document: ${drift.savedBalance} ৳. Drift: ${drift.drift} ৳.`
-          );
+          ).catch(err => console.warn("Failed to log drift alert:", err));
         }
       });
     }

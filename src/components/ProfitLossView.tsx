@@ -27,24 +27,27 @@ const NON_INCOME_CATEGORIES = [
 
 // Helper to calculate PnL for a specific range
 const calculatePnLForRange = (sales: any[], payments: any[], summaries: any[], products: any[], subDbShipments: any[], startDate: string, endDate: string) => {
+    // FIX: তারিখ দিন-স্তরে (YYYY-MM-DD) normalize — নাহলে ISO টাইমস্ট্যাম্প (যেমন POS বিক্রয়) শেষ তারিখের সীমায় বাদ পড়ে
+    const dayOf = (d: any): string => String(d || "").slice(0, 10);
+
     // Standard POS sales filtering (approved only)
     const filteredSales = sales.filter(s => 
-      s.date >= startDate && 
-      s.date <= endDate && 
+      dayOf(s.date) >= startDate && 
+      dayOf(s.date) <= endDate && 
       s.status !== "rejected" && 
       s.approved !== false
     );
 
     // DSR Settled Summaries filtering
     const filteredSummaries = summaries.filter(s => {
-      const sDate = s.settlementDate || s.date;
+      const sDate = dayOf(s.settlementDate || s.date);
       return s.status === "settled" && s.approved && sDate >= startDate && sDate <= endDate;
     });
 
     // Payments filtering
     const filteredPayments = payments.filter(p => 
-      p.date >= startDate && 
-      p.date <= endDate && 
+      dayOf(p.date) >= startDate && 
+      dayOf(p.date) <= endDate && 
       p.status !== "rejected" &&
       p.approved !== false
     );
@@ -125,7 +128,7 @@ const calculatePnLForRange = (sales: any[], payments: any[], summaries: any[], p
 
     // 4. Calculate Sub-DB Shipments Net Profit in date range
     const filteredSubDbShipments = subDbShipments.filter(s => 
-      s.date >= startDate && s.date <= endDate
+      dayOf(s.date) >= startDate && dayOf(s.date) <= endDate
     );
     const totalSubDbProfit = filteredSubDbShipments.reduce((sum, s) => {
       return sum + Number(s.totalSubDbProfit || 0);
