@@ -204,7 +204,7 @@ export default function AfternoonSettlementPage({
 
     const totalFreeValue = freeItems.reduce((acc, f) => {
       const prod = products.find(p => p.id === f.productId);
-      return acc + (Number(f.quantity) * Number(prod?.price || 0));
+      return acc + (Number(f.quantity) * Number(f.unitPrice ?? prod?.price ?? 0));
     }, 0);
     const totalFreePieces = freeItems.reduce((acc, f) => acc + Number(f.quantity), 0);
 
@@ -742,6 +742,7 @@ export default function AfternoonSettlementPage({
                                 quantity: totalPcs,
                                 cartons: parseInt(freeCartons) || 0,
                                 pieces: parseInt(freePieces) || 0,
+                                unitPrice: Number(selectedFreeProduct.price || 0),
                                 note: freeNote
                               }
                             ]);
@@ -1369,6 +1370,9 @@ export default function AfternoonSettlementPage({
 
               <div className="border-t border-b border-gray-300 py-2 space-y-1 font-bold">
                 <div className="flex justify-between text-indigo-900"><span>DSR PAYABLE:</span> <span>৳{calculations?.dsrPayable}</span></div>
+                {(calculations?.openingAdvanceVal || 0) > 0 && (
+                  <div className="flex justify-between text-amber-700"><span>পুরনো অ্যাডভান্স থেকে কাটা (+):</span> <span>৳{(calculations?.openingAdvanceVal || 0).toLocaleString()}</span></div>
+                )}
                 <div className="flex justify-between text-emerald-800"><span>TOTAL PAID:</span> <span>৳{calculations?.totalPaymentsValue}</span></div>
                 <div className={`flex justify-between ${calculations?.balance && calculations.balance < 0 ? "text-red-600" : "text-emerald-700"}`}>
                   <span>NET BALANCE:</span> <span>৳{calculations?.balance}</span>
@@ -1399,4 +1403,5 @@ export default function AfternoonSettlementPage({
     </div>
   );
 }
+
 
