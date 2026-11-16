@@ -340,7 +340,7 @@ export default function DashboardView(props: DashboardProps) {
 
   const reconciliationMetrics = useMemo(() => {
     // 1. Inventory Value (ইনভেন্টরি পণ্যের মূল্য)
-    const totalInventoryValue = products.reduce((sum, p) => sum + (Number(p.stock || 0) * Number(p.purchasePrice || p.price || 0)), 0);
+    const totalInventoryValue = products.reduce((sum, p) => sum + (Number(p.stock || 0) * Number(p.costPrice || p.cost || p.purchasePrice || 0)), 0);
 
     // 2. Cash/Bank (হাতে নগদ ও ব্যাংক ক্যাশ)
     const totalCashValue = accounts.reduce((sum, a) => sum + Number(a.balance || 0), 0);

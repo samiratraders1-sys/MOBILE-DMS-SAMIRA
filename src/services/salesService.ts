@@ -12,6 +12,17 @@ import { writeBatch, doc, collection, serverTimestamp } from "firebase/firestore
 import { db } from "../lib/firebase";
 import { calculateSaleTotals } from "../utils/calculations";
 
+function safeParseArray(key: string): any[] {
+  try {
+    const stored = localStorage.getItem(key);
+    const parsed = stored ? JSON.parse(stored) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    console.warn(`Corrupted localStorage cache "${key}", resetting:`, e);
+    return [];
+  }
+}
+
 export interface CompleteSalePayload {
   customerId: string;
   customerName: string;
@@ -235,15 +246,13 @@ export async function completeSale(orderData: CompleteSaleOrderData): Promise<{
 
   if (isDemoMode) {
     // Demo Mode handling using localStorage
-    const storedOrders = localStorage.getItem("demo_coll_orders");
-    const ordersList = storedOrders ? JSON.parse(storedOrders) : [];
+    const ordersList = safeParseArray("demo_coll_orders");
     const ordIdx = ordersList.findIndex((o: any) => o.id === orderId);
     if (ordIdx >= 0 && ordersList[ordIdx].status === "Complete") {
       throw new Error(`অর্ডার #${orderId.slice(0, 8)} ইতিমধ্যে সম্পন্ন (Complete) হয়ে গেছে। পুনরায় ইনভেন্টরি কর্তন সম্ভব নয়।`);
     }
 
-    const storedProducts = localStorage.getItem("demo_coll_products");
-    const productsList = storedProducts ? JSON.parse(storedProducts) : [];
+    const productsList = safeParseArray("demo_coll_products");
 
     // Consolidate required quantity per unique productId
     const consolidatedMap = new Map<string, {
@@ -326,8 +335,7 @@ export async function completeSale(orderData: CompleteSaleOrderData): Promise<{
     }
 
     // Write sales_report entry
-    const storedReports = localStorage.getItem("demo_coll_sales_report");
-    const reportsList = storedReports ? JSON.parse(storedReports) : [];
+    const reportsList = safeParseArray("demo_coll_sales_report");
     const reportId = `report_${Date.now()}`;
     reportsList.unshift({
       id: reportId,

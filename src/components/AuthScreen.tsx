@@ -96,7 +96,13 @@ export default function AuthScreen({ onEnterDemo }: AuthScreenProps) {
 
       // 4. Stash in localStorage for offline availability
       const localUsersStr = localStorage.getItem("local_users") || "[]";
-      const localUsers = JSON.parse(localUsersStr);
+      let localUsers: any[] = [];
+      try {
+        const parsedUsers = JSON.parse(localUsersStr);
+        if (Array.isArray(parsedUsers)) localUsers = parsedUsers;
+      } catch (parseErr) {
+        console.warn("Corrupted local_users cache, resetting:", parseErr);
+      }
       localUsers.push(newUserRecord);
       localStorage.setItem("local_users", JSON.stringify(localUsers));
 

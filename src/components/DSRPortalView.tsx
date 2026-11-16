@@ -174,13 +174,14 @@ export default function DSRPortalView({
 
   // Form calculation results
   const calculations = useMemo(() => {
-    if (!activeSummary) return null;
+    if (!activeSummary || !activeSummary.items) return null;
 
     let totalSalesValue = 0;
     const items = activeSummary.items.map((item: any) => {
       const pId = item.productId;
       const ret = returnQtys[pId] || 0;
-      const soldQty = Math.max(0, item.totalPieces - ret);
+      const assigned = Number(item.totalPieces || item.qty || 0);
+      const soldQty = Math.max(0, assigned - ret);
       const saleVal = soldQty * (item.price || 0);
       totalSalesValue += saleVal;
 
@@ -192,17 +193,17 @@ export default function DSRPortalView({
       };
     });
 
-    const totalDamageValue = damageItems.reduce((acc, d) => acc + (Number(d.quantity) * Number(d.price)), 0);
+    const totalDamageValue = damageItems.reduce((acc, d) => acc + (Number(d.quantity) * Number(d.price || 0)), 0);
 
     const totalFreeValue = freeItems.reduce((acc, f) => {
       const prodObj = products.find(p => p.id === f.productId);
       return acc + (Number(f.quantity) * Number(f.unitPrice ?? prodObj?.price ?? 0));
     }, 0);
 
-    const totalDiscountValue = discountItems.reduce((acc, d) => acc + d.amount, 0);
-    const totalExpensesValue = expenses.reduce((acc, e) => acc + e.amount, 0);
-    const totalCreditsValue = credits.reduce((acc, c) => acc + c.amount, 0);
-    const totalPaymentsValue = payments.reduce((acc, p) => acc + p.amount, 0);
+    const totalDiscountValue = discountItems.reduce((acc, d) => acc + Number(d.amount || 0), 0);
+    const totalExpensesValue = expenses.reduce((acc, e) => acc + Number(e.amount || 0), 0);
+    const totalCreditsValue = credits.reduce((acc, c) => acc + Number(c.amount || 0), 0);
+    const totalPaymentsValue = payments.reduce((acc, p) => acc + Number(p.amount || 0), 0);
 
     // DSR Payable = (Total Sales) - (Damage Value) - (Free Value) - (Discounts) - (Expenses) - (Credits/Baki)
     const dsrPayable = totalSalesValue - totalDamageValue - totalFreeValue - totalDiscountValue - totalExpensesValue - totalCreditsValue;
