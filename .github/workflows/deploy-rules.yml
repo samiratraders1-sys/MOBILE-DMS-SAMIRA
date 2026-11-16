@@ -86,19 +86,39 @@ jobs:
         run: |
           TOKEN=$(cat /tmp/tok)
           PROJ="${{ steps.sa.outputs.project_id }}"
-          echo "checking/creating (default) database in $PROJ ..."
-          RESP=$(curl -s -X POST "https://firestore.googleapis.com/v1/projects/$PROJ/databases" \
-            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-            -d '{"databaseId":"(default)","locationId":"asia-south1","type":"FIRESTORE_NATIVE"}')
-          echo "$RESP" | head -c 400
-          echo ""
-          if echo "$RESP" | grep -q "ALREADY_EXISTS"; then
+          echo "checking (default) database in $PROJ ..."
+          GET=$(curl -s "https://firestore.googleapis.com/v1/projects/$PROJ/databases/(default)" \
+            -H "Authorization: Bearer $TOKEN")
+          if echo "$GET" | grep -q '"name"'; then
             echo "ডাটাবেস আগে থেকেই আছে — ঠিক আছে"
-          elif echo "$RESP" | grep -q '"name"'; then
-            echo "ডাটাবেস তৈরি হয়েছে ✅"
-          elif echo "$RESP" | grep -q "403\|PERMISSION"; then
-            echo "::error::পারমিশন নেই (403) — service account-এর Editor রোল সেভ হয়নি বা এখনো কার্যকর হয়নি। ৫ মিনিট পর আবার চালান, নাহলে IAM-এ রোলটা যাচাই করুন।"
-            exit 1
+          else
+            echo "ডাটাবেস নেই — তৈরি করছি (asia-south1) ..."
+            # FIX: databaseId অবশ্যই query parameter হতে হবে, JSON body-তে নয় (আগে 400 INVALID_ARGUMENT হচ্ছিল)
+            RESP=$(curl -s -X POST "https://firestore.googleapis.com/v1/projects/$PROJ/databases?databaseId=(default)" \
+              -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+              -d '{"locationId":"asia-south1","type":"FIRESTORE_NATIVE"}')
+            echo "$RESP" | head -c 400
+            echo ""
+            if echo "$RESP" | grep -q "ALREADY_EXISTS"; then
+              echo "ডাটাবেস আগে থেকেই আছে — ঠিক আছে"
+            elif echo "$RESP" | grep -q '"name"'; then
+              OP=$(echo "$RESP" | node -e "try{process.stdout.write(JSON.parse(require('fs').readFileSync(0,'utf8')).name||'')}catch(e){}")
+              echo "operation: $OP — সম্পূর্ণ হওয়ার অপেক্ষায় ..."
+              for i in $(seq 1 24); do
+                sleep 5
+                ST=$(curl -s "https://firestore.googleapis.com/v1/$OP" -H "Authorization: Bearer $TOKEN")
+                if echo "$ST" | grep -q '"done": true'; then
+                  echo "ডাটাবেস তৈরি সম্পূর্ণ ✅"
+                  break
+                fi
+              done
+            elif echo "$RESP" | grep -q "403\|PERMISSION"; then
+              echo "::error::পারমিশন নেই (403) — service account-এর Editor রোল সেভ হয়নি বা এখনো কার্যকর হয়নি। ৫ মিনিট পর আবার চালান, নাহলে IAM-এ রোলটা যাচাই করুন।"
+              exit 1
+            else
+              echo "::error::ডাটাবেস তৈরি ব্যর্থ — উপরের এররটা দেখুন"
+              exit 1
+            fi
           fi
 
       - name: Deploy rules via Firebase Rules API
@@ -121,14 +141,19 @@ jobs:
           fi
           echo "ruleset OK: $RS"
           echo "attaching to release cloud.firestore ..."
-          FINAL=$(curl -s -X PUT "https://firebaserules.googleapis.com/v1/projects/$PROJ/releases/cloud.firestore" \
-            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-            -d "{\"name\":\"projects/$PROJ/releases/cloud.firestore\",\"rulesetName\":\"$RS\"}")
-          echo "$FINAL" | head -c 500
-          echo ""
-          if echo "$FINAL" | grep -q '"name"'; then
-            echo "🎉 রুলস লাইভ হয়ে গেছে!"
-          else
-            echo "::error::release আপডেট ব্যর্থ — উপরের এররটা দেখুন"
-            exit 1
-          fi
+          # নতুন ডাটাবেস প্রভিশন হতে কিছু সময় লাগতে পারে — তাই রিলিজে রিট্রাই লুপ
+          for i in 1 2 3 4 5; do
+            FINAL=$(curl -s -X PUT "https://firebaserules.googleapis.com/v1/projects/$PROJ/releases/cloud.firestore" \
+              -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+              -d "{\"name\":\"projects/$PROJ/releases/cloud.firestore\",\"rulesetName\":\"$RS\"}")
+            echo "$FINAL" | head -c 500
+            echo ""
+            if echo "$FINAL" | grep -q '"name"'; then
+              echo "🎉 রুলস লাইভ হয়ে গেছে!"
+              exit 0
+            fi
+            echo "রিলিজ এখনো রেডি নয় (প্রচেষ্টা $i/৫) — ৫ সেকেন্ড পর আবার ..."
+            sleep 5
+          done
+          echo "::error::release আপডেট ব্যর্থ — উপরের এররটা দেখুন"
+          exit 1
