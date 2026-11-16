@@ -91,6 +91,9 @@ jobs:
             -H "Authorization: Bearer $TOKEN")
           if echo "$GET" | grep -q '"name"'; then
             echo "ডাটাবেস আগে থেকেই আছে — ঠিক আছে"
+          elif echo "$GET" | grep -q "PERMISSION_DENIED"; then
+            echo "::warning::ডাটাবেস আছে কি না যাচাই করা গেল না (403) — service account-এর datastore.databases.get পারমিশন নেই।"
+            echo "ডিপ্লয় চেষ্টা চলবে; ব্যর্থ হলে Firebase Console-এ Firestore ডাটাবেস তৈরি আছে কি না দেখুন, নাহলে IAM-এ 'Cloud Datastore Owner' রোল দিন।"
           else
             echo "ডাটাবেস নেই — তৈরি করছি (asia-south1) ..."
             # FIX: databaseId অবশ্যই query parameter হতে হবে, JSON body-তে নয় (আগে 400 INVALID_ARGUMENT হচ্ছিল)
@@ -113,7 +116,9 @@ jobs:
                 fi
               done
             elif echo "$RESP" | grep -q "403\|PERMISSION"; then
-              echo "::error::পারমিশন নেই (403) — service account-এর Editor রোল সেভ হয়নি বা এখনো কার্যকর হয়নি। ৫ মিনিট পর আবার চালান, নাহলে IAM-এ রোলটা যাচাই করুন।"
+              echo "::error::পারমিশন নেই (403) — service account-এর Firestore ডাটাবেস তৈরির অনুমতি (datastore.databases.create) নেই।"
+              echo "দুটি সমাধানের যেকোনো একটি করুন: (১) Firebase Console → প্রজেক্ট → Firestore Database → Create database (asia-south1) — তারপর আবার এই ওয়ার্কফ্লো চালান;"
+              echo "অথবা (২) Google Cloud Console → IAM & Admin → IAM → এই service account-এ 'Cloud Datastore Owner' রোল দিন — তারপর আবার চালান।"
               exit 1
             else
               echo "::error::ডাটাবেস তৈরি ব্যর্থ — উপরের এররটা দেখুন"
