@@ -45,6 +45,23 @@ jobs:
           echo "project_id=$PID" >> "$GITHUB_OUTPUT"
           echo "service account OK, project_id = $PID"
 
+      - name: Resolve target project & database from app config
+        if: steps.check.outputs.configured == 'true'
+        id: target
+        run: |
+          TARGET=$(jq -r .projectId firebase-applet-config.json)
+          DBID=$(jq -r '.firestoreDatabaseId // "(default)"' firebase-applet-config.json)
+          [ -z "$TARGET" ] || [ "$TARGET" = "null" ] && { echo "::error::firebase-applet-config.json-এ projectId নেই"; exit 1; }
+          echo "target project = $TARGET, database = $DBID"
+          SA_PID="${{ steps.sa.outputs.project_id }}"
+          if [ "$SA_PID" != "$TARGET" ]; then
+            echo "::error::FIREBASE_SERVICE_ACCOUNT সিক্রেটটা ভুল প্রজেক্টের — সিক্রেটে আছে '$SA_PID', অথচ অ্যাপ ব্যবহার করে '$TARGET'।"
+            echo "$TARGET প্রজেক্টে নতুন service account তৈরি করে (Firebase Rules Admin রোল সহ) সেই JSON key দিয়ে সিক্রেট আপডেট করুন।"
+            exit 1
+          fi
+          echo "project=$TARGET" >> "$GITHUB_OUTPUT"
+          echo "database=$DBID" >> "$GITHUB_OUTPUT"
+
       - name: Mint access token
         if: steps.check.outputs.configured == 'true'
         run: |
@@ -85,9 +102,10 @@ jobs:
         if: steps.check.outputs.configured == 'true'
         run: |
           TOKEN=$(cat /tmp/tok)
-          PROJ="${{ steps.sa.outputs.project_id }}"
-          echo "checking (default) database in $PROJ ..."
-          GET=$(curl -s "https://firestore.googleapis.com/v1/projects/$PROJ/databases/(default)" \
+          PROJ="${{ steps.target.outputs.project }}"
+          DBID="${{ steps.target.outputs.database }}"
+          echo "checking database '$DBID' in $PROJ ..."
+          GET=$(curl -s "https://firestore.googleapis.com/v1/projects/$PROJ/databases/$DBID" \
             -H "Authorization: Bearer $TOKEN")
           if echo "$GET" | grep -q '"name"'; then
             echo "ডাটাবেস আগে থেকেই আছে — ঠিক আছে"
@@ -97,7 +115,7 @@ jobs:
           else
             echo "ডাটাবেস নেই — তৈরি করছি (asia-south1) ..."
             # FIX: databaseId অবশ্যই query parameter হতে হবে, JSON body-তে নয় (আগে 400 INVALID_ARGUMENT হচ্ছিল)
-            RESP=$(curl -s -X POST "https://firestore.googleapis.com/v1/projects/$PROJ/databases?databaseId=(default)" \
+            RESP=$(curl -s -X POST "https://firestore.googleapis.com/v1/projects/$PROJ/databases?databaseId=$DBID" \
               -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
               -d '{"locationId":"asia-south1","type":"FIRESTORE_NATIVE"}')
             echo "$RESP" | head -c 400
@@ -132,10 +150,17 @@ jobs:
           TOKEN=$(cat /tmp/tok)
           PROJ="${{ steps.sa.outputs.project_id }}"
           RULES=$(jq -Rs . firestore.rules)
-          echo "creating ruleset ..."
+          DBID="${{ steps.target.outputs.database }}"
+          echo "creating ruleset (database: $DBID) ..."
+          # নেমড ডাটাবেসের জন্য attachment_point লাগবে (docs: firestore.googleapis.com/projects/P/databases/DB)
+          if [ "$DBID" = "(default)" ]; then
+            BODY="{\"source\":{\"files\":[{\"name\":\"firestore.rules\",\"content\":$RULES}]}}"
+          else
+            BODY="{\"source\":{\"files\":[{\"name\":\"firestore.rules\",\"content\":$RULES}],\"attachment_point\":\"firestore.googleapis.com/projects/$PROJ/databases/$DBID\"}}"
+          fi
           curl -s -X POST "https://firebaserules.googleapis.com/v1/projects/$PROJ/rulesets" \
             -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-            -d "{\"source\":{\"files\":[{\"name\":\"firestore.rules\",\"content\":$RULES}]}}" \
+            -d "$BODY" \
             -o /tmp/rs.json
           cat /tmp/rs.json
           echo ""
@@ -145,12 +170,19 @@ jobs:
             exit 1
           fi
           echo "ruleset OK: $RS"
-          echo "attaching to release cloud.firestore ..."
+          echo "attaching to release cloud.firestore/$DBID ..."
+          REL="projects/$PROJ/releases/cloud.firestore/$DBID"
           # নতুন ডাটাবেস প্রভিশন হতে কিছু সময় লাগতে পারে — তাই রিলিজে রিট্রাই লুপ
           for i in 1 2 3 4 5; do
-            FINAL=$(curl -s -X PUT "https://firebaserules.googleapis.com/v1/projects/$PROJ/releases/cloud.firestore" \
+            # আগে PATCH (আপডেট); রিলিজ না থাকলে NOT_FOUND দিলে POST-এ তৈরি
+            FINAL=$(curl -s -X PATCH "https://firebaserules.googleapis.com/v1/$REL" \
               -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-              -d "{\"name\":\"projects/$PROJ/releases/cloud.firestore\",\"rulesetName\":\"$RS\"}")
+              -d "{\"name\":\"$REL\",\"rulesetName\":\"$RS\"}")
+            if echo "$FINAL" | grep -q "NOT_FOUND"; then
+              FINAL=$(curl -s -X POST "https://firebaserules.googleapis.com/v1/projects/$PROJ/releases" \
+                -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+                -d "{\"name\":\"$REL\",\"rulesetName\":\"$RS\"}")
+            fi
             echo "$FINAL" | head -c 500
             echo ""
             if echo "$FINAL" | grep -q '"name"'; then
