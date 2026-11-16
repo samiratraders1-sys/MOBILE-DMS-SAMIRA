@@ -49,7 +49,7 @@ export const calculateTotalInvestment = (params: InvestmentParams) => {
       .filter(m => m.productId === p.id && m.isDamage)
       .reduce((sum, m) => sum + m.quantity, 0);
 
-    const cost = p.costPrice || p.price || 0;
+    const cost = p.costPrice || p.cost || 0;
     if (freshQty > 0) freshStockValuation += (freshQty * cost);
     if (damageQty > 0) damageStockValuation += (damageQty * cost);
   });
@@ -60,6 +60,7 @@ export const calculateTotalInvestment = (params: InvestmentParams) => {
   let totalCustomerDues = 0;
   const customerTxs = transactions.filter(t => t.partyType === 'CUSTOMER');
   customerTxs.forEach(t => {
+    if (t.approved === false) return;
     if (['SALES', 'DUE', 'DEBIT', 'SHORT'].includes(t.type)) totalCustomerDues += t.amount;
     else if (['COLLECTION', 'RETURN', 'DISCOUNT', 'CREDIT', 'PAYMENT'].includes(t.type)) totalCustomerDues -= t.amount;
   });
@@ -74,6 +75,7 @@ export const calculateTotalInvestment = (params: InvestmentParams) => {
   let totalStaffDues = 0;
   const staffTxs = transactions.filter(t => t.partyType === 'STAFF');
   staffTxs.forEach(t => {
+    if (t.approved === false) return;
     if (['SHORT', 'DUE', 'DEBIT'].includes(t.type)) totalStaffDues += t.amount;
     else if (['COLLECTION', 'SALARY', 'TRANSFER', 'CREDIT', 'PAYMENT'].includes(t.type)) totalStaffDues -= t.amount;
   });

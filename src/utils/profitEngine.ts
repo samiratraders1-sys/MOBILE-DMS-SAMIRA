@@ -33,18 +33,21 @@ export function calculateNetProfit({
   startDate,
   endDate
 }: ProfitEngineInput): ProfitMetrics {
-  
+
+  // FIX: তারিখ দিন-স্তরে (YYYY-MM-DD) normalize — ISO টাইমস্ট্যাম্প (POS বিক্রয়) শেষ তারিখের সীমায় বাদ পড়ত
+  const dayOf = (d: any): string => String(d || "").slice(0, 10);
+
   // 1. Filter POS sales
   const filteredSales = sales.filter(s => {
     if (s.status === "rejected" || s.approved === false) return false;
-    if (startDate && s.date < startDate) return false;
-    if (endDate && s.date > endDate) return false;
+    if (startDate && dayOf(s.date) < startDate) return false;
+    if (endDate && dayOf(s.date) > endDate) return false;
     return true;
   });
 
   // 2. Filter settled DSR summaries
   const filteredSummaries = summaries.filter(s => {
-    const sDate = s.settlementDate || s.date || "";
+    const sDate = dayOf(s.settlementDate || s.date);
     const isSettled = s.status === "settled" && s.approved !== false;
     if (!isSettled) return false;
     if (startDate && sDate < startDate) return false;
@@ -55,14 +58,14 @@ export function calculateNetProfit({
   // 3. Filter payments (for other income or legacy expenses)
   const filteredPayments = payments.filter(p => {
     if (p.status === "rejected" || p.approved === false) return false;
-    if (startDate && p.date < startDate) return false;
-    if (endDate && p.date > endDate) return false;
+    if (startDate && dayOf(p.date) < startDate) return false;
+    if (endDate && dayOf(p.date) > endDate) return false;
     return true;
   });
 
   // 4. Filter new shared expenses
   const filteredExpenses = expenses.filter(e => {
-    const eDate = e.date || "";
+    const eDate = dayOf(e.date);
     if (startDate && eDate < startDate) return false;
     if (endDate && eDate > endDate) return false;
     return true;
@@ -70,8 +73,8 @@ export function calculateNetProfit({
 
   // 5. Filter sub-db shipments for sub-depot commission
   const filteredSubDbShipments = subDbShipments.filter(s => {
-    if (startDate && s.date < startDate) return false;
-    if (endDate && s.date > endDate) return false;
+    if (startDate && dayOf(s.date) < startDate) return false;
+    if (endDate && dayOf(s.date) > endDate) return false;
     return true;
   });
 
